@@ -39,6 +39,13 @@
 
 	async function probe() {
 		try {
+			const authed = await fetch("/api/admin/keys");
+			if (authed.ok) {
+				auth.classList.add("hidden");
+				dash.classList.remove("hidden");
+				loadKeys();
+				return;
+			}
 			const s = await (await fetch("/api/admin/setup")).json();
 			if (s.needed) {
 				setupBox.classList.remove("hidden");
