@@ -429,8 +429,38 @@ app.get("/api/status", h(async (_req, res) => {
 	res.json({ ok: true, name: "CopE Loader", adminNeeded: !(await kv.getAdminHash()), persistent: kv.isPersistent() });
 }));
 
-// ---- Homepage: admin only (this site has no public buyer page) -------------
-app.get("/", (_req, res) => res.redirect("/admin"));
+// ---- Homepage: convincing 404 so the site looks like a dead domain ------
+app.get("/", (_req, res) => {
+	res.status(404).set("Content-Type", "text/html").send(`<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8"/>
+<meta name="viewport" content="width=device-width,initial-scale=1"/>
+<title>404 Not Found</title>
+<style>
+*{margin:0;padding:0;box-sizing:border-box}
+body{background:#0f0f0f;color:#999;font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,Helvetica,Arial,sans-serif;min-height:100vh;display:flex;justify-content:center;align-items:center}
+.wrap{text-align:center;padding:40px 20px}
+h1{font-size:72px;font-weight:700;color:#555;margin-bottom:12px}
+p{font-size:18px;color:#666;margin-bottom:24px}
+code{font-size:13px;color:#555;background:#1a1a1a;padding:4px 10px;border-radius:4px;display:inline-block}
+hr{border:none;border-top:1px solid #222;margin:28px auto;max-width:200px}
+span.note{font-size:13px;color:#444}
+</style>
+</head>
+<body>
+<div class="wrap">
+<h1>404</h1>
+<p>The requested URL was not found on this server.</p>
+<hr/>
+<code>Not Found</code>
+<hr/>
+<span class="note">Apache/2.4.62 (Ubuntu) Server at cope-loader.vercel.app Port 80</span>
+</div>
+</body>
+</html>`);
+});
+
 app.get("/admin", (_req, res) => res.sendFile(path.join(__dirname, "public", "admin.html")));
 
 // ---- Static ----------------------------------------------------------------
