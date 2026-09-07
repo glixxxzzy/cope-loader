@@ -313,7 +313,7 @@ app.post("/api/admin/setup", h(async (req, res) => {
 
 // ---- Health ----------------------------------------------------------------
 app.get("/api/status", h(async (_req, res) => {
-	res.json({ ok: true, name: "CopE Loader", adminNeeded: !(await kv.getAdminHash()) });
+	res.json({ ok: true, name: "CopE Loader", adminNeeded: !(await kv.getAdminHash()), persistent: kv.isPersistent() });
 }));
 
 // ---- Homepage: admin only (this site has no public buyer page) -------------

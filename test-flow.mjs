@@ -17,6 +17,10 @@ async function main() {
 	let d = await r.json();
 	check("setup reports needed", d.needed === true);
 
+	r = await fetch(BASE + "/api/status");
+	d = await r.json();
+	check("status reports persistence flag", typeof d.persistent === "boolean");
+
 	r = await fetch(BASE + "/api/admin/setup", {
 		method: "POST",
 		headers: { "Content-Type": "application/json" },

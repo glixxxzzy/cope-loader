@@ -7,6 +7,29 @@
 	const rows = document.getElementById("rows");
 	const empty = document.getElementById("empty");
 	const statline = document.getElementById("statline");
+	const persistWarn = document.getElementById("persistWarn");
+
+	let persistent = true;
+
+	function checkPersistence() {
+		fetch("/api/status")
+			.then((r) => r.json())
+			.then((s) => {
+				persistent = !!s.persistent;
+				renderPersistence();
+			})
+			.catch(() => {});
+	}
+
+	function renderPersistence() {
+		if (persistent) {
+			persistWarn.classList.add("hidden");
+		} else {
+			persistWarn.textContent =
+				"Storage is NOT persistent: keys and this password are in memory and will reset on the next cold start or redeploy. Set DATABASE_URL in Vercel before selling keys.";
+			persistWarn.classList.remove("hidden");
+		}
+	}
 
 	function msg(text, kind) {
 		authMsg.className = "msg " + (kind || "err");
@@ -67,6 +90,7 @@
 	}
 
 	async function loadKeys() {
+		checkPersistence();
 		const res = await guard(() => fetch("/api/admin/keys"));
 		if (!res) return;
 		const data = await res.json();
