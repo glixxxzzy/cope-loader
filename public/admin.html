@@ -42,6 +42,7 @@
 				</select>
 				<input type="number" id="count" value="1" min="1" max="100" style="max-width:90px" title="How many keys" />
 				<button id="generate">Generate keys</button>
+				<button class="secondary" id="genericLoader" title="Copy a loader that asks the buyer for their key inside the executor">Copy key-page loader</button>
 			</div>
 			<div id="genOut"></div>
 
@@ -58,8 +59,18 @@
 				<p class="meta" id="empty" style="padding:10px">No keys yet.</p>
 			</div>
 
-			<p class="meta">To give a buyer access: click <b>Loader</b> on their key, copy the Luau snippet, and send
-				<em>that</em> — the key check happens on the server when they paste it into their executor. No website link needed.</p>
+			<p class="meta">To give a buyer access: click <b>Loader</b> on their key to send a one-click snippet, or copy the
+				<b>key-page loader</b> once and hand it to everyone — it opens a key entry page in the executor and validates
+				the key on the server when it is submitted. Revoking a key kills any snippet that carries it.</p>
+
+			<h2>Loadstring converter</h2>
+			<p class="meta">Turns a Luau script into a single self-contained <code>loadstring</code> build — no server, no key. Useful for testing the payload without the loader site.</p>
+			<textarea id="convSrc" rows="6" placeholder="Paste your Luau script here…"></textarea>
+			<div class="row" style="margin-top:10px">
+				<button id="convDo">Convert pasted script</button>
+				<button class="secondary" id="convFile">Convert scripts/main.luau</button>
+			</div>
+			<div id="convOut"></div>
 
 			<h2>Hygiene</h2>
 			<div class="row" style="margin-top:4px">

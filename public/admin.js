@@ -161,6 +161,51 @@
 	});
 
 	document.getElementById("refresh").addEventListener("click", loadKeys);
+	document.getElementById("genericLoader").addEventListener("click", async () => {
+		const res = await guard(() => fetch("/api/admin/loader/generic"));
+		if (!res) return;
+		const data = await res.json();
+		if (data.ok && data.loader) {
+			document.getElementById("loaderText").textContent = data.loader;
+			document.getElementById("loaderModal").classList.remove("hidden");
+		} else {
+			msg(data.error || "Could not build the key-page loader.");
+		}
+	});
+	document.getElementById("convDo").addEventListener("click", () => convert( false ));
+	document.getElementById("convFile").addEventListener("click", () => convert(true));
+
+	async function convert(fromFile) {
+		const box = document.getElementById("convOut");
+		const body = fromFile ? { file: true } : { script: document.getElementById("convSrc").value };
+		box.innerHTML = '<div class="msg">Converting…</div>';
+		const res = await guard(() =>
+			fetch("/api/admin/convert", {
+				method: "POST",
+				headers: { "Content-Type": "application/json" },
+				body: JSON.stringify(body),
+			})
+		);
+		if (!res) return;
+		const data = await res.json();
+		if (!data.ok || !data.snippet) {
+			box.innerHTML = '<div class="msg err">' + esc(data.error || "Conversion failed") + "</div>";
+			return;
+		}
+		box.innerHTML =
+			'<div class="msg ok">Converted ' + (data.size / 1024).toFixed(1) + " KB of source &rarr; " +
+			(data.blobChars / 1024).toFixed(0) + " KB packed. Copy and paste into your executor.</div>" +
+			'<div class="row" style="margin-top:8px"><button class="small" data-convcopy="1">Copy loadstring</button></div>' +
+			'<pre class="code" id="convText" style="margin-top:8px;user-select:all">' + esc(data.snippet) + "</pre>";
+		box.dataset.snippet = data.snippet;
+	}
+
+	document.getElementById("convOut").addEventListener("click", async (ev) => {
+		if (!ev.target.dataset.convcopy) return;
+		const text = document.getElementById("convText").textContent || "";
+		try { await navigator.clipboard.writeText(text); ev.target.textContent = "Copied"; setTimeout(() => (ev.target.textContent = "Copy loadstring"), 1200); }
+		catch { msg("Clipboard blocked — select the text manually."); }
+	});
 	document.getElementById("loaderClose").addEventListener("click", () => {
 		document.getElementById("loaderModal").classList.add("hidden");
 	});

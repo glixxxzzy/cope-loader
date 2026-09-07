@@ -110,6 +110,33 @@ async function main() {
 	check("loader embeds the key", d.loader.includes(key));
 	check("loader calls /api/redeem", d.loader.includes("/api/redeem"));
 
+	// 10b. generic key-page loader (no baked key)
+	r = await fetch(BASE + "/api/admin/loader/generic", { headers: { Cookie: "sid=" + sid } });
+	d = await r.json();
+	check("generic loader generated", d.ok === true && !!d.loader);
+	check("generic loader shows a key page", d.loader.includes("Unlock"));
+	check("generic loader embeds no key", !d.loader.includes("KEY-"));
+	check("generic loader still calls /api/redeem", d.loader.includes("/api/redeem"));
+
+	// 10c. convert pasted script -> standalone loadstring build
+	r = await fetch(BASE + "/api/admin/convert", {
+		method: "POST",
+		headers: { "Content-Type": "application/json", Cookie: "sid=" + sid },
+		body: JSON.stringify({ script: "print('hi')\nfor i = 1, 5 do print(i) end\n" }),
+	});
+	d = await r.json();
+	check("convert returns a snippet", d.ok === true && !!d.snippet);
+	check("convert snippet uses loadstring", d.snippet.includes("loadstring"));
+
+	// 10d. convert scripts/main.luau from file
+	r = await fetch(BASE + "/api/admin/convert", {
+		method: "POST",
+		headers: { "Content-Type": "application/json", Cookie: "sid=" + sid },
+		body: JSON.stringify({ file: true }),
+	});
+	d = await r.json();
+	check("convert from file works", d.ok === true && !!d.snippet);
+
 	// 11. admin session required for admin endpoints
 	r = await fetch(BASE + "/api/admin/keys");
 	check("admin without session blocked (401)", r.status === 401);

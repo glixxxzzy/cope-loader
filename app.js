@@ -6,7 +6,7 @@ const crypto = require("crypto");
 
 const protect = require("./lib/protect");
 const kv = require("./lib/kv");
-const { buildLoader } = require("./lib/loader");
+const { buildLoader, buildLoadstring } = require("./lib/loader");
 
 const CONFIG_PATH = path.join(__dirname, "config.json");
 const SCRIPT_PATH = process.env.SCRIPT_PATH || path.join(__dirname, "scripts", "main.luau");
@@ -22,7 +22,7 @@ const config = (() => {
 const REDEEM_LIMIT_PER_MIN = Number(
 	process.env.REDEEM_RATE_LIMIT || config.redeemRateLimit || 10
 );
-const ADMIN_SESSION_SECONDS = 8 * 60 * 60;
+const ADMIN_SESSION_SECONDS = Number(process.env.ADMIN_SESSION_SECONDS || 30 * 24 * 60 * 60);
 
 // --------------------------------------------------------------------------
 // Script payload cache (re-reads on mtime change when the file changes on disk)
@@ -225,20 +225,64 @@ app.delete("/api/admin/keys/:id", requireAdmin, h(async (req, res) => {
 	res.json({ ok: true });
 }));
 
-// Build the single-loader snippet for one key - the seller sends THIS to the
-// buyer instead of any website link.
-app.get("/api/admin/keys/:id/loader", requireAdmin, h(async (req, res) => {
-	const row = await kv.findByKey(req.params.id);
-	if (!row) return res.status(404).json({ ok: false, error: "not found" });
-	const baseUrl = (
+// Resolve the public base URL once, the same way for every loader build.
+function getBaseUrl(req) {
+	return (
 		process.env.PUBLIC_BASE_URL ||
 		config.publicBaseUrl ||
 		`${req.protocol}://${req.get("host")}`
 	).replace(/\/$/, "");
+}
+
+// Build the single-loader snippet for one key - the seller sends THIS to the
+// buyer instead of any website link. The key is baked in: it validates and
+// runs silently.
+app.get("/api/admin/keys/:id/loader", requireAdmin, h(async (req, res) => {
+	const row = await kv.findByKey(req.params.id);
+	if (!row) return res.status(404).json({ ok: false, error: "not found" });
 	res.json({
 		ok: true,
-		loader: buildLoader(baseUrl, row.key),
-		baseUrl,
+		loader: buildLoader(getBaseUrl(req), row.key),
+		baseUrl: getBaseUrl(req),
+	});
+}));
+
+// Generic loader - no baked key. Running it opens the key-entry page styled
+// like the hub; the buyer's key is collected in-game and validated on the
+// server before the payload is fetched.
+app.get("/api/admin/loader/generic", requireAdmin, h(async (_req, res) => {
+	res.json({
+		ok: true,
+		loader: buildLoader(getBaseUrl(_req)),
+		baseUrl: getBaseUrl(_req),
+		keyed: false,
+	});
+}));
+
+// Convert a Luau script into a self-contained loadstring. The script is packed
+// with the same Park-Miller + XOR cipher and the packed bytes ride inside the
+// snippet, so the output needs no server and no key.
+app.post("/api/admin/convert", requireAdmin, h(async (req, res) => {
+	const { script, file } = req.body || {};
+	const src = file ? getScriptBytes().toString("utf8") : String(script || "");
+	if (!src.trim()) {
+		return res.status(400).json({ ok: false, error: "Nothing to convert - paste a script first." });
+	}
+	if (Buffer.byteLength(src, "utf8") > 600 * 1024) {
+		return res.status(400).json({ ok: false, error: "Script too large (max 600 KB)." });
+	}
+	if (src.includes("\0")) {
+		return res.status(400).json({ ok: false, error: "Script contains null bytes." });
+	}
+	const seed = protect.seedFromToken(protect.randomToken());
+	const packed = protect.pack(src, seed);
+	const csv = protect.blobToString(packed);
+	res.json({
+		ok: true,
+		snippet: buildLoadstring(csv, seed),
+		seed,
+		size: src.length,
+		blobChars: csv.length,
 	});
 }));
 
