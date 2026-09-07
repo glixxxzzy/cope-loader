@@ -9,7 +9,6 @@
 <body>
 	<header>
 		<div class="brand">CopE<span>Loader</span> <span style="color:var(--muted);font-weight:400;font-size:13px">admin</span></div>
-		<a href="/">‹ Back to loader</a>
 	</header>
 	<main>
 		<section id="auth">
@@ -59,12 +58,30 @@
 				<p class="meta" id="empty" style="padding:10px">No keys yet.</p>
 			</div>
 
+			<p class="meta">To give a buyer access: click <b>Loader</b> on their key, copy the Luau snippet, and send
+				<em>that</em> — the key check happens on the server when they paste it into their executor. No website link needed.</p>
+
 			<h2>Hygiene</h2>
 			<div class="row" style="margin-top:4px">
 				<button class="secondary" id="logout">Sign out</button>
 			</div>
 		</section>
 	</main>
+
+	<div id="loaderModal" class="modal hidden">
+		<div class="card">
+			<div class="toolbar">
+				<b>Loader for this key</b>
+				<div style="margin-left:auto">
+					<button class="secondary small" id="loaderCopy">Copy</button>
+					<button class="secondary small" id="loaderClose">Close</button>
+				</div>
+			</div>
+			<p class="meta" style="margin:8px 0">Paste this into your executor once. Every run re-validates the key on the server —
+				revoking the key kills every copy of this snippet instantly.</p>
+			<pre class="code" id="loaderText" style="max-height:340px;overflow:auto"></pre>
+		</div>
+	</div>
 	<script src="/admin.js"></script>
 </body>
 </html>

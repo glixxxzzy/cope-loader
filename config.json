@@ -1,5 +1,4 @@
 {
   "port": 3300,
-  "tokenTtlMs": 900000,
   "redeemRateLimit": 10
 }

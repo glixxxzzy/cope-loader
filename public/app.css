@@ -68,6 +68,18 @@ button.danger { background: #3b1622; color: var(--bad); }
 button.small { padding: 6px 12px; font-size: 13px; border-radius: 7px; }
 button:disabled { opacity: 0.5; cursor: not-allowed; }
 .hidden { display: none !important; }
+.modal {
+	position: fixed;
+	inset: 0;
+	z-index: 50;
+	display: flex;
+	align-items: flex-start;
+	justify-content: center;
+	background: rgba(5, 9, 15, 0.82);
+	padding: 40px 18px;
+	overflow: auto;
+}
+.modal > .card { width: 100%; max-width: 760px; }
 pre.code {
 	background: #0a0f18;
 	border: 1px solid var(--edge);

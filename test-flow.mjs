@@ -35,18 +35,22 @@ async function main() {
 	d = await r.json();
 	check("admin login", d.ok === true && !!sid);
 
-	// 3. generate keys
+	// 3. homepage has no public buyer page - admin only
+	r = await fetch(BASE + "/");
+	check("homepage redirects to /admin", r.redirected && r.url.endsWith("/admin"));
+
+	// 4. generate a key
 	r = await fetch(BASE + "/api/admin/keys", {
 		method: "POST",
 		headers: { "Content-Type": "application/json", Cookie: "sid=" + sid },
-		body: JSON.stringify({ count: 1, note: "test buyer", expiresIn: "" }),
+		body: JSON.stringify({ count: 1, note: "buyer one", expiresIn: "" }),
 	});
 	d = await r.json();
 	check("key generated", d.ok === true && d.keys.length === 1);
 	const key = d.keys[0].key;
 	console.log("key:", key);
 
-	// 4. redeem with bad key
+	// 5. redeem with bad key
 	r = await fetch(BASE + "/api/redeem", {
 		method: "POST",
 		headers: { "Content-Type": "application/json" },
@@ -55,35 +59,62 @@ async function main() {
 	d = await r.json();
 	check("bad key rejected", !d.ok);
 
-	// 5. redeem with good key
+	// 6. redeem with good key -> packed payload comes straight back
 	r = await fetch(BASE + "/api/redeem", {
 		method: "POST",
 		headers: { "Content-Type": "application/json" },
 		body: JSON.stringify({ key }),
 	});
 	d = await r.json();
-	check("good key redeemed", d.ok === true && !!d.loader && !!d.ttlSeconds);
-	const tv = (d.loader.match(/\/api\/claim\?token=" \.\. ([A-Za-z0-9_]+)/) || [])[1];
-	const token = tv ? (d.loader.match(new RegExp('local ' + tv + ' = "([0-9a-f]+)"')) || [])[1] : null;
-	check("token embedded in loader", !!token, tv || "no token var");
-
-	// 6. claim
-	r = await fetch(BASE + "/api/claim?token=" + token);
-	d = await r.json();
-	check("claim returns packed blob", !!d.blob && !!d.seed);
+	check("good key redeemed", d.ok === true && !!d.blob && !!d.seed);
 	const src = fs.readFileSync("scripts/main.luau", "utf8");
 	const back = protect.unpack(d.blob, d.seed);
 	check("blob unpacks to exact payload", back === src, back.length + " vs " + src.length);
 
-	// 7. second claim must fail (single-use)
-	r = await fetch(BASE + "/api/claim?token=" + token);
-	check("second claim rejected (409)", r.status === 409);
+	// 7. same key can redeem again (unlimited re-issue)
+	const prevBlob = d.blob;
+	r = await fetch(BASE + "/api/redeem", {
+		method: "POST",
+		headers: { "Content-Type": "application/json" },
+		body: JSON.stringify({ key }),
+	});
+	d = await r.json();
+	check("same key redeems again", d.ok === true && d.blob !== prevBlob);
 
-	// 8. admin session required for admin endpoints
+	// 8. revoke the key -> every copy of the loader dies instantly
+	r = await fetch(BASE + "/api/admin/keys/" + encodeURIComponent(key) + "/revoke", {
+		method: "POST",
+		headers: { Cookie: "sid=" + sid },
+	});
+	d = await r.json();
+	check("key revoked", d.ok === true && d.revoked === true);
+	r = await fetch(BASE + "/api/redeem", {
+		method: "POST",
+		headers: { "Content-Type": "application/json" },
+		body: JSON.stringify({ key }),
+	});
+	check("revoked key rejected", !r.ok);
+
+	// 9. un-revoke (keep the key usable for the rest of the test)
+	await fetch(BASE + "/api/admin/keys/" + encodeURIComponent(key) + "/revoke", {
+		method: "POST",
+		headers: { Cookie: "sid=" + sid },
+	});
+
+	// 10. admin builds the single-loader snippet for a key
+	r = await fetch(BASE + "/api/admin/keys/" + encodeURIComponent(key) + "/loader", {
+		headers: { Cookie: "sid=" + sid },
+	});
+	d = await r.json();
+	check("loader generated for key", d.ok === true && !!d.loader);
+	check("loader embeds the key", d.loader.includes(key));
+	check("loader calls /api/redeem", d.loader.includes("/api/redeem"));
+
+	// 11. admin session required for admin endpoints
 	r = await fetch(BASE + "/api/admin/keys");
 	check("admin without session blocked (401)", r.status === 401);
 
-	// 9. no admin access to payload without token
+	// 12. no admin access to payload without a valid key
 	r = await fetch(BASE + "/scripts/main.luau");
 	check("payload not directly served (404)", r.status === 404);
 }

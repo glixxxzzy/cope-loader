@@ -1,11 +1,12 @@
 # CopE Loader — key-gated script loader
 
 A free, self-hosted Roblox script loader with a key system, script packing and
-an admin console. Built as a direct answer to "Luarmor-style, but self-hosted
-and free": buyers land on the site, enter a key you gave them, and copy a
-paste-into-executor loader containing your **packed** script. No plaintext is
-ever served, the generated loader expires, and each loader token can only be
-claimed **once**.
+an admin console — **admin-only**. There is no public homepage: you create keys
+in the console and hand buyers a **loader snippet** instead of a website link.
+When the buyer pastes the snippet into their executor it POSTs their key to
+`/api/redeem`; the server validates it and returns the **packed** script, which
+the snippet decrypts and runs. No plaintext is ever served, and revoking a key
+kills every copy of that snippet instantly.
 
 ## Stack (100% free)
 
@@ -23,38 +24,41 @@ npm install
 node server.js
 ```
 
-1. Open `http://127.0.0.1:3300` — you see the loader page.
-2. Open `http://127.0.0.1:3300/admin` — the **first** thing it asks is to set an
-   admin password (min 8 chars). It's stored as a SHA-256 in the database (table
-   `cope_admin`); keep it safe.
+1. Open `http://127.0.0.1:3300` — it redirects to `/admin` (this site is
+   admin-only).
+2. The **first** thing `/admin` asks is to set an admin password (min 8 chars).
+   It's stored as a SHA-256 in the database (table `cope_admin`); keep it safe.
 3. On the admin page: set the note (buyer name), pick an expiry, enter the
-   count, hit **Generate keys**. Copy the keys, hand them to your buyers.
-4. Replace `scripts/main.luau` with your real script — the server picks the new
+   count, hit **Generate keys**.
+4. For each key hit **Loader** → **Copy**. Send that Luau snippet to the buyer
+   (it contains their key). You never give out website links.
+5. Replace `scripts/main.luau` with your real script — the server picks the new
    file up automatically (it re-reads on mtime change).
 
-## How a buyer uses it
+## How it works for a buyer
 
-1. Enters their key on the homepage.
-2. Gets a Luau snippet + a "copy" button (the snippet expires in ~15 min).
-3. Pastes it into their executor. The snippet:
+1. You send them a one-key loader snippet (from the admin console).
+2. They paste it into their executor. The snippet:
 
-   - calls `/api/claim?token=...` — the **only** place the packed payload exists;
+   - POSTs the key to `/api/redeem` (server-side validation, rate-limited);
+   - on success gets the **only** copy of the packed payload + seed;
    - rebuilds the keystream with the **same Park–Miller LCG the server used**
      (verified byte-for-byte against the JS packer in an executor);
    - XORs the bytes back to your source and `loadstring`s it.
 
-Re-running a stale snippet after the window (or a re-shared one) fails — the
-server rejects used tokens, so copied snippets rot. Your key is unlimited: your
-buyer can just redeem again.
+Every run re-validates the key. If you revoke a key, every snippet carrying it
+stops working on the next load — no loader redistribution survives a revoke.
+The same key can be re-redeemed as often as the buyer wants; keys never expire
+unless you set an expiry.
 
 ## Protection model (read this — honest limits)
 
 | What | How |
 |---|---|
-| Script never leaks as text | payload only ever leaves the server XOR-packed, gated by a valid token |
+| Script never leaks as text | payload only ever leaves the server XOR-packed, gated by a valid server-side key check |
 | Keys | unique `KEY-XXXX...` per buyer; revoke anytime; optional expiry |
-| Loader copies rot | 15-minute tokens, single-claim, server-validated |
-| Script won't run for free | without a valid unclaimed token no blob is ever handed out |
+| Revoke = kill switch | a revoked key makes every snippet carrying it fail at the next run |
+| Script won't run for free | without a valid key no blob is ever handed out |
 | Execution only for intact payload | the loader aborts if `loadstring` fails to compile |
 
 Limits (deliberate, so you don't oversell it): this is **not** a VM obfuscator.
@@ -72,7 +76,6 @@ Env vars (all optional except on Vercel):
 ```text
 DATABASE_URL       Postgres connection string (required for real persistence / Vercel)
 PUBLIC_BASE_URL    public URL loaders should point at, e.g. https://your-app.vercel.app
-TOKEN_TTL_MS       loader expiry window (default 900000 = 15 min)
 REDEEM_RATE_LIMIT  redeem attempts per IP per minute (default 10)
 PORT               local server port (default 3300)
 ADMIN_PASSWORD     if set, pre-installs this as the admin password (first boot only)
@@ -102,11 +105,11 @@ ADMIN_PASSWORD     if set, pre-installs this as the admin password (first boot o
 
 ## API snapshot
 
-- `POST /api/redeem {key}` → `{ loader, ttlSeconds, expiresAt, payloadBytes }`
-- `GET /api/claim?token=...` → `{ blob, seed, size }` (single claim, TTL-bound)
+- `POST /api/redeem {key}` → `{ ok, blob, seed, size }` (packed payload; used by the loader snippet)
 - Admin (session cookie): `POST /api/admin/setup`, `POST /api/admin/login`,
-  `GET/POST /api/admin/keys`, `POST /api/admin/keys/:id/revoke`,
-  `DELETE /api/admin/keys/:id`, `GET /api/admin/stats`
+  `GET/POST /api/admin/keys`, `GET /api/admin/keys/:id/loader` (build the snippet),
+  `POST /api/admin/keys/:id/revoke`, `DELETE /api/admin/keys/:id`, `GET /api/admin/stats`
+- Root `/` redirects to `/admin` — no public buyer page exists
 
 ## Files
 

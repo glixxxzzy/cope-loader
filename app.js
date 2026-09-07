@@ -19,7 +19,6 @@ const config = (() => {
 	}
 })();
 
-const TTL_MS = Number(process.env.TOKEN_TTL_MS || config.tokenTtlMs || 15 * 60 * 1000);
 const REDEEM_LIMIT_PER_MIN = Number(
 	process.env.REDEEM_RATE_LIMIT || config.redeemRateLimit || 10
 );
@@ -103,7 +102,8 @@ app.use((req, res, next) => {
 	next();
 });
 
-// ---- Public: key redemption -----------------------------------------------
+// ---- Public (used only by the loader snippet inside the executor) ---------
+// Redeem a key: server validates it and returns the packed payload + seed.
 app.post(
 	"/api/redeem",
 	h(async (req, res) => {
@@ -113,7 +113,7 @@ app.post(
 		}
 		const { key } = req.body || {};
 		if (!key || typeof key !== "string" || key.length > 64) {
-			return res.status(400).json({ ok: false, error: "Enter the key you were given." });
+			return res.status(400).json({ ok: false, error: "Invalid request." });
 		}
 		const k = key.trim();
 		const row = await kv.findByKey(k);
@@ -135,49 +135,13 @@ app.post(
 				.json({ ok: false, error: "No protected script uploaded yet (scripts/main.luau missing)." });
 		}
 
-		const token = protect.randomToken();
-		const ttlSeconds = Math.round(TTL_MS / 1000);
-		await kv.tokenCreate(token, ttlSeconds);
-		const seed = protect.seedFromToken(token);
-		const baseUrl = (
-			process.env.PUBLIC_BASE_URL ||
-			config.publicBaseUrl ||
-			`${req.protocol}://${req.get("host")}`
-		).replace(/\/$/, "");
-
-		const loader = buildLoader(baseUrl, token, seed, ttlSeconds);
-		res.json({
-			ok: true,
-			loader,
-			expiresAt: asIso(Date.now() + TTL_MS),
-			ttlSeconds,
-			payloadBytes: bytes.length,
-		});
-	})
-);
-
-// ---- Public: claim the packed payload once (single claim per token) -------
-app.get(
-	"/api/claim",
-	h(async (req, res) => {
-		const token = req.query.token;
-		const rec = token ? await kv.tokenGet(token) : null;
-		if (!rec) return res.status(404).json({ error: "token unknown" });
-		const won = await kv.tokenClaimLock(token, Math.round(TTL_MS / 1000));
-		if (!won) {
-			return res.status(409).json({ error: "token already claimed - redeem your key again" });
-		}
-		const bytes = getScriptBytes();
-		if (bytes.length === 0) {
-			return res.status(500).json({ error: "payload missing" });
-		}
-		const seed = protect.seedFromToken(token);
+		const seed = protect.seedFromToken(protect.randomToken());
 		const packed = protect.pack(bytes.toString("utf8"), seed);
 		res.json({
+			ok: true,
 			blob: protect.blobToString(packed),
 			seed,
 			size: bytes.length,
-			expiresAt: asIso(Date.now() + TTL_MS),
 		});
 	})
 );
@@ -251,13 +215,31 @@ app.post("/api/admin/keys", requireAdmin, h(async (req, res) => {
 app.post("/api/admin/keys/:id/revoke", requireAdmin, h(async (req, res) => {
 	const row = await kv.findByKey(req.params.id);
 	if (!row) return res.status(404).json({ ok: false, error: "not found" });
-	await kv.setRevoked(req.params.id, !row.revoked);
-	res.json({ ok: true, revoked: !row.revoked });
+	const target = !row.revoked;
+	await kv.setRevoked(req.params.id, target);
+	res.json({ ok: true, revoked: target });
 }));
 
 app.delete("/api/admin/keys/:id", requireAdmin, h(async (req, res) => {
 	await kv.deleteKey(req.params.id);
 	res.json({ ok: true });
+}));
+
+// Build the single-loader snippet for one key - the seller sends THIS to the
+// buyer instead of any website link.
+app.get("/api/admin/keys/:id/loader", requireAdmin, h(async (req, res) => {
+	const row = await kv.findByKey(req.params.id);
+	if (!row) return res.status(404).json({ ok: false, error: "not found" });
+	const baseUrl = (
+		process.env.PUBLIC_BASE_URL ||
+		config.publicBaseUrl ||
+		`${req.protocol}://${req.get("host")}`
+	).replace(/\/$/, "");
+	res.json({
+		ok: true,
+		loader: buildLoader(baseUrl, row.key),
+		baseUrl,
+	});
 }));
 
 app.get("/api/admin/stats", requireAdmin, h(async (_req, res) => {
@@ -289,6 +271,9 @@ app.post("/api/admin/setup", h(async (req, res) => {
 app.get("/api/status", h(async (_req, res) => {
 	res.json({ ok: true, name: "CopE Loader", adminNeeded: !(await kv.getAdminHash()) });
 }));
+
+// ---- Homepage: admin only (this site has no public buyer page) -------------
+app.get("/", (_req, res) => res.redirect("/admin"));
 
 // ---- Static ----------------------------------------------------------------
 app.use(express.static(path.join(__dirname, "public")));
