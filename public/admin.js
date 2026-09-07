@@ -66,10 +66,11 @@
 
 	document.getElementById("doLogin").addEventListener("click", async () => {
 		const password = document.getElementById("pwLogin").value;
+		const remember = document.getElementById("rememberLogin").checked;
 		const res = await fetch("/api/admin/login", {
 			method: "POST",
 			headers: { "Content-Type": "application/json" },
-			body: JSON.stringify({ password }),
+			body: JSON.stringify({ password, remember }),
 		});
 		const data = await res.json();
 		if (!res.ok || !data.ok) return msg(data.error || "Wrong password");

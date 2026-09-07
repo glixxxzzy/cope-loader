@@ -224,16 +224,17 @@ app.get(
 app.post(
 	"/api/admin/login",
 	h(async (req, res) => {
-		const { password } = req.body || {};
+		const { password, remember } = req.body || {};
 		if (!(await isValidAdmin(password))) {
 			return res.status(401).json({ ok: false, error: "Wrong password" });
 		}
 		const sid = kv.randomId(24);
-		await kv.sessionCreate(sid, ADMIN_SESSION_SECONDS);
+		const ttl = remember ? ADMIN_SESSION_SECONDS : 8 * 60 * 60;
+		await kv.sessionCreate(sid, ttl);
 		res.cookie("sid", sid, {
 			httpOnly: true,
 			sameSite: "lax",
-			maxAge: ADMIN_SESSION_SECONDS * 1000,
+			maxAge: ttl * 1000,
 		});
 		res.json({ ok: true });
 	})
