@@ -233,7 +233,9 @@ app.post(
 		await kv.sessionCreate(sid, ttl);
 		res.cookie("sid", sid, {
 			httpOnly: true,
+			secure: true,
 			sameSite: "lax",
+			path: "/",
 			maxAge: ttl * 1000,
 		});
 		res.json({ ok: true });
@@ -245,7 +247,7 @@ app.post(
 	h(async (req, res) => {
 		const sid = req.cookies && req.cookies.sid;
 		if (sid) await kv.sessionDestroy(sid);
-		res.clearCookie("sid");
+		res.clearCookie("sid", { path: "/", httpOnly: true, secure: true, sameSite: "lax" });
 		res.json({ ok: true });
 	})
 );
