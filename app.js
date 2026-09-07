@@ -165,10 +165,24 @@ function packChunk(source) {
 	return buildLoadstring(protect.blobToString(packed), seed);
 }
 
+// Returns true when the request came from a real web browser. The executor's
+// game:HttpGet goes through Roblox's HTTP stack and never sends a browser UA,
+// so this blocks "open the URL in Chrome and download the code" while the
+// loader keeps working. It is anti-browser, not anti-hacker.
+function isBrowser(req) {
+	const ua = String(req.headers["user-agent"] || "").toLowerCase();
+	return ua.startsWith("mozilla");
+}
+
 app.get(
 	"/api/script",
 	h(async (req, res) => {
 		res.setHeader("Cache-Control", "no-store");
+
+		// Browsing the URL directly must show nothing and download nothing.
+		if (isBrowser(req)) {
+			return res.status(404).type("text/plain").send("not found");
+		}
 
 		const ip = req.headers["x-forwarded-for"] || req.ip || req.socket.remoteAddress || "0";
 		if (!(await kv.redeemAllowed(ip, REDEEM_LIMIT_PER_MIN))) {
