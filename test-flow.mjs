@@ -148,6 +148,35 @@ async function main() {
 	// 12. no admin access to payload without a valid key
 	r = await fetch(BASE + "/scripts/main.luau");
 	check("payload not directly served (404)", r.status === 404);
+
+	// 13. one-liner endpoint: no key -> key-gate bootstrap (valid Luau, no plaintext)
+	r = await fetch(BASE + "/api/script");
+	const gate = await r.text();
+	check("one-liner gate served", r.status === 200 && /^-- CopE Loader - one-liner key gate/.test(gate));
+	check("one-liner gate shows key page", gate.includes("CopELoaderGate") && gate.includes("Unlock"));
+	check("one-liner gate fetches url by key", gate.includes("/api/script?key="));
+	check("one-liner gate carries no plaintext payload", !gate.includes("Open Egg"));
+
+	// 14. one-liner endpoint: valid key -> packed standalone build, never plaintext
+	r = await fetch(BASE + "/api/script?key=" + encodeURIComponent(key));
+	const packedChunk = await r.text();
+	check("one-liner packed chunk served", r.status === 200 && packedChunk.includes("loadstring(table.concat"));
+	check("one-liner packed chunk hides the source", !packedChunk.includes("Open Egg"));
+
+	// 15. one-liner endpoint: bad key -> erroring chunk with a message
+	r = await fetch(BASE + "/api/script?key=KEY-NOPE");
+	d = { text: await r.text() };
+	check("one-liner bad key rejected", r.status === 403 && d.text.includes("invalid or revoked key"));
+
+	// 16. admin one-liner helpers
+	r = await fetch(BASE + "/api/admin/oneline", { headers: { Cookie: "sid=" + sid } });
+	d = await r.json();
+	check("generic one-liner returned", d.ok === true && /^loadstring\(game:HttpGet\("/.test(d.line));
+	check("generic one-liner has no key", !d.line.includes("?key="));
+
+	r = await fetch(BASE + "/api/admin/keys/" + encodeURIComponent(key) + "/oneline", { headers: { Cookie: "sid=" + sid } });
+	d = await r.json();
+	check("per-key one-liner returned", d.ok === true && d.line.includes("/api/script?key=" + encodeURIComponent(key)));
 }
 
 main().catch((e) => {

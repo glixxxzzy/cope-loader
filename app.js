@@ -6,7 +6,7 @@ const crypto = require("crypto");
 
 const protect = require("./lib/protect");
 const kv = require("./lib/kv");
-const { buildLoader, buildLoadstring } = require("./lib/loader");
+const { buildLoader, buildHttpGate, buildLoadstring } = require("./lib/loader");
 
 const CONFIG_PATH = path.join(__dirname, "config.json");
 const SCRIPT_PATH = process.env.SCRIPT_PATH || path.join(__dirname, "scripts", "main.luau");
@@ -146,6 +146,70 @@ app.post(
 	})
 );
 
+// The one-liner endpoint the seller's buyers loadstring. With no key it
+// returns the key-entry gate bootstrap (valid Luau); with a valid key it
+// returns the packed, self-decoding payload chunk - never the plaintext
+// script. Error responses are erroring chunks so loadstring still compiles
+// and the buyer sees an actual message instead of silence.
+function scriptStatusChunk(msg) {
+	return (
+		"-- CopE Loader: " + msg +
+		"\nerror(\"CopE Loader: " + String(msg).replace(/"/g, "") + "\")"
+	);
+}
+
+app.get(
+	"/api/script",
+	h(async (req, res) => {
+		res.setHeader("Cache-Control", "no-store");
+
+		const ip = req.headers["x-forwarded-for"] || req.ip || req.socket.remoteAddress || "0";
+		if (!(await kv.redeemAllowed(ip, REDEEM_LIMIT_PER_MIN))) {
+			return res
+				.status(429)
+				.type("text/plain")
+				.send(scriptStatusChunk("too many requests - slow down"));
+		}
+
+		const key = typeof req.query.key === "string" ? req.query.key.trim() : "";
+		if (!key) {
+			return res.status(200).type("text/plain").send(buildHttpGate(getBaseUrl(req)));
+		}
+
+		if (key.length > 64) {
+			return res.status(400).type("text/plain").send(scriptStatusChunk("invalid request"));
+		}
+		const row = await kv.findByKey(key);
+		if (!row || row.revoked) {
+			return res.status(403).type("text/plain").send(scriptStatusChunk("invalid or revoked key"));
+		}
+		if (row.expires) {
+			const expMs = new Date(row.expires).getTime();
+			if (Number.isFinite(expMs) && Date.now() > expMs) {
+				return res
+					.status(403)
+					.type("text/plain")
+					.send(scriptStatusChunk("this key has expired"));
+			}
+		}
+		await kv.bumpUse(key);
+
+		const bytes = getScriptBytes();
+		if (bytes.length === 0) {
+			return res
+				.status(500)
+				.type("text/plain")
+				.send(scriptStatusChunk("no script uploaded yet"));
+		}
+		const seed = protect.seedFromToken(protect.randomToken());
+		const packed = protect.pack(bytes.toString("utf8"), seed);
+		res
+			.status(200)
+			.type("text/plain")
+			.send(buildLoadstring(protect.blobToString(packed), seed));
+	})
+);
+
 // ---- Admin auth -----------------------------------------------------------
 app.post(
 	"/api/admin/login",
@@ -256,6 +320,27 @@ app.get("/api/admin/loader/generic", requireAdmin, h(async (_req, res) => {
 		loader: buildLoader(getBaseUrl(_req)),
 		baseUrl: getBaseUrl(_req),
 		keyed: false,
+	});
+}));
+
+// Generic one-liner - no baked key. The buyer runs it, the key page appears
+// in-game, and on submit it fetches /api/script?key=... itself.
+app.get("/api/admin/oneline", requireAdmin, h(async (req, res) => {
+	const base = getBaseUrl(req);
+	res.json({ ok: true, line: `loadstring(game:HttpGet("${base}/api/script"))()`, baseUrl: base });
+}));
+
+// Per-key one-liner - the key rides in the URL, so running it unlocks and runs
+// silently.
+app.get("/api/admin/keys/:id/oneline", requireAdmin, h(async (req, res) => {
+	const row = await kv.findByKey(req.params.id);
+	if (!row) return res.status(404).json({ ok: false, error: "not found" });
+	const base = getBaseUrl(req);
+	res.json({
+		ok: true,
+		line: `loadstring(game:HttpGet("${base}/api/script?key=${row.key}"))()`,
+		baseUrl: base,
+		keyed: true,
 	});
 }));
 

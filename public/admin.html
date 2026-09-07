@@ -44,6 +44,7 @@
 				<input type="number" id="count" value="1" min="1" max="100" style="max-width:90px" title="How many keys" />
 				<button id="generate">Generate keys</button>
 				<button class="secondary" id="genericLoader" title="Copy a loader that asks the buyer for their key inside the executor">Copy key-page loader</button>
+				<button class="secondary" id="oneLiner" title="Copy a one-liner: loadstring(game:HttpGet(".../api/script"))()">Copy one-liner</button>
 			</div>
 			<div id="genOut"></div>
 
@@ -60,11 +61,12 @@
 				<p class="meta" id="empty" style="padding:10px">No keys yet.</p>
 			</div>
 
-			<p class="meta">To give a buyer access: click <b>Loader</b> on their key to send a one-click snippet, or copy the
-				<b>key-page loader</b> once and hand it to everyone — it opens a key entry page in the executor and validates
-				the key on the server when it is submitted. Revoking a key kills any snippet that carries it.</p>
+			<p class="meta">To give a buyer access: click <b>Loader</b> on their key to send a one-click snippet, <b>One-line</b> to
+				send a single <code>loadstring</code> line with their key baked into the URL, or copy the <b>key-page loader</b> or
+				<b>one-liner</b> once and hand it to everyone — the key page opens in the executor and validates on the server when
+				the key is submitted. Revoking a key kills any snippet that carries it.</p>
 
-			<h2>Loadstring converter</h2>
+			<h2>Offline build <span style="font-weight:400;color:var(--muted);font-size:12px">(no server, no key)</span></h2>
 			<p class="meta">Turns a Luau script into a single self-contained <code>loadstring</code> build — no server, no key. Useful for testing the payload without the loader site.</p>
 			<textarea id="convSrc" rows="6" placeholder="Paste your Luau script here…"></textarea>
 			<div class="row" style="margin-top:10px">
@@ -80,18 +82,17 @@
 		</section>
 	</main>
 
-	<div id="loaderModal" class="modal hidden">
+	<div id="snippetModal" class="modal hidden">
 		<div class="card">
 			<div class="toolbar">
-				<b>Loader for this key</b>
+				<b id="snippetTitle">Snippet</b>
 				<div style="margin-left:auto">
-					<button class="secondary small" id="loaderCopy">Copy</button>
-					<button class="secondary small" id="loaderClose">Close</button>
+					<button class="secondary small" id="snippetCopy">Copy</button>
+					<button class="secondary small" id="snippetClose">Close</button>
 				</div>
 			</div>
-			<p class="meta" style="margin:8px 0">Paste this into your executor once. Every run re-validates the key on the server —
-				revoking the key kills every copy of this snippet instantly.</p>
-			<pre class="code" id="loaderText" style="max-height:340px;overflow:auto"></pre>
+			<p class="meta" style="margin:8px 0" id="snippetDesc"></p>
+			<pre class="code" id="snippetText" style="max-height:340px;overflow:auto;user-select:all"></pre>
 		</div>
 	</div>
 	<script src="/admin.js"></script>

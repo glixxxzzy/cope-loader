@@ -113,6 +113,7 @@
 				"<td class=\"mono\">" + (k.last_use ? esc(k.last_use.slice(0, 19).replace("T", " ")) : "—") + "</td>" +
 				'<td style="text-align:right">' +
 				'<button class="small" data-loader="' + esc(k.key) + '">Loader</button> ' +
+				'<button class="secondary small" data-oneline="' + esc(k.key) + '">One-line</button> ' +
 				'<button class="secondary small" data-revoke="' + esc(k.key) + '">' + (k.revoked ? "Unrevoke" : "Revoke") + "</button> " +
 				'<button class="danger small" data-del="' + esc(k.key) + '">Del</button></td>';
 			rows.appendChild(tr);
@@ -138,10 +139,28 @@
 			if (!res) return;
 			const data = await res.json();
 			if (data.ok && data.loader) {
-				document.getElementById("loaderText").textContent = data.loader;
-				document.getElementById("loaderModal").classList.remove("hidden");
+				showSnippet(
+					"Loader for this key",
+					"Paste this into your executor once. Every run re-validates the key on the server — revoking the key kills every copy of this snippet instantly.",
+					data.loader
+				);
 			} else {
 				msg(data.error || "Could not build loader.");
+			}
+			return;
+		}
+		if (t.dataset.oneline) {
+			const res = await guard(() => fetch("/api/admin/keys/" + encodeURIComponent(t.dataset.oneline) + "/oneline"));
+			if (!res) return;
+			const data = await res.json();
+			if (data.ok && data.line) {
+				showSnippet(
+					"One-liner for this key",
+					"The key is baked into this URL. Running the line unlocks and starts the script silently.",
+					data.line
+				);
+			} else {
+				msg(data.error || "Could not build one-liner.");
 			}
 			return;
 		}
@@ -190,10 +209,27 @@
 		if (!res) return;
 		const data = await res.json();
 		if (data.ok && data.loader) {
-			document.getElementById("loaderText").textContent = data.loader;
-			document.getElementById("loaderModal").classList.remove("hidden");
+			showSnippet(
+				"Key-page loader",
+				"Hand this to every buyer. Running it opens a key entry page in the executor; each key is validated on the server when it is submitted.",
+				data.loader
+			);
 		} else {
 			msg(data.error || "Could not build the key-page loader.");
+		}
+	});
+	document.getElementById("oneLiner").addEventListener("click", async () => {
+		const res = await guard(() => fetch("/api/admin/oneline"));
+		if (!res) return;
+		const data = await res.json();
+		if (data.ok && data.line) {
+			showSnippet(
+				"One-liner (key page)",
+				"Hand this to every buyer. Running the line fetches the script URL from the server and opens the key page in the executor.",
+				data.line
+			);
+		} else {
+			msg(data.error || "Could not build the one-liner.");
 		}
 	});
 	document.getElementById("convDo").addEventListener("click", () => convert( false ));
@@ -230,14 +266,22 @@
 		try { await navigator.clipboard.writeText(text); ev.target.textContent = "Copied"; setTimeout(() => (ev.target.textContent = "Copy loadstring"), 1200); }
 		catch { msg("Clipboard blocked — select the text manually."); }
 	});
-	document.getElementById("loaderClose").addEventListener("click", () => {
-		document.getElementById("loaderModal").classList.add("hidden");
+	document.getElementById("snippetClose").addEventListener("click", () => {
+		document.getElementById("snippetModal").classList.add("hidden");
 	});
-	document.getElementById("loaderCopy").addEventListener("click", async () => {
-		const text = document.getElementById("loaderText").textContent || "";
-		try { await navigator.clipboard.writeText(text); document.getElementById("loaderCopy").textContent = "Copied"; setTimeout(() => (document.getElementById("loaderCopy").textContent = "Copy"), 1200); }
-		catch { msg("Clipboard blocked — select the loader text manually."); }
+	document.getElementById("snippetCopy").addEventListener("click", async () => {
+		const text = document.getElementById("snippetText").textContent || "";
+		try { await navigator.clipboard.writeText(text); document.getElementById("snippetCopy").textContent = "Copied"; setTimeout(() => (document.getElementById("snippetCopy").textContent = "Copy"), 1200); }
+		catch { msg("Clipboard blocked — select the text manually."); }
 	});
+
+	function showSnippet(title, desc, text) {
+		document.getElementById("snippetTitle").textContent = title;
+		document.getElementById("snippetDesc").textContent = desc;
+		document.getElementById("snippetText").textContent = text;
+		document.getElementById("snippetCopy").textContent = "Copy";
+		document.getElementById("snippetModal").classList.remove("hidden");
+	}
 	document.getElementById("logout").addEventListener("click", async () => {
 		await fetch("/api/admin/logout", { method: "POST" });
 		dash.classList.add("hidden");
