@@ -1,0 +1,41 @@
+<!doctype html>
+<html lang="en">
+<head>
+	<meta charset="utf-8" />
+	<meta name="viewport" content="width=device-width, initial-scale=1" />
+	<title>CopE Loader</title>
+	<link rel="stylesheet" href="/app.css" />
+</head>
+<body>
+	<header>
+		<div class="brand">CopE<span>Loader</span></div>
+		<a href="/admin">Admin</a>
+	</header>
+	<main>
+		<h1>Enter your key</h1>
+		<p class="lead">
+			Keys are handed out by the owner. Submit yours and you'll get a one-time
+			loadstring to paste into your executor. The generated snippet expires
+			after a short window — you can always come back and re-redeem with the
+			same key.
+		</p>
+		<div class="card">
+			<div class="row">
+				<input type="text" id="key" placeholder="KEY-XXXXXXXXXXXX" autocomplete="off" spellcheck="false" />
+				<button id="redeem">Redeem</button>
+			</div>
+			<div id="msg" class="msg hidden"></div>
+			<div id="result" class="hidden">
+				<div class="toolbar">
+					<strong style="font-size:14px">Copy-paste this into your executor</strong>
+					<button id="copy" class="secondary small">Copy</button>
+				</div>
+				<pre class="code" id="out"></pre>
+				<p class="meta" id="meta"></p>
+			</div>
+		</div>
+	</main>
+	<footer>Bought a key? Contact the owner. Keys and loaders are tied to this key only.</footer>
+	<script src="/app.js"></script>
+</body>
+</html>

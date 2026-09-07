@@ -1,0 +1,10 @@
+node_modules/
+keys.db
+keys.db-journal
+keys.db-wal
+keys.db-shm
+admin.hash
+config.local.json
+.vercel/
+out.log
+err.log

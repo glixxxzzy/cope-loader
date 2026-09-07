@@ -1,0 +1,70 @@
+<!doctype html>
+<html lang="en">
+<head>
+	<meta charset="utf-8" />
+	<meta name="viewport" content="width=device-width, initial-scale=1" />
+	<title>Admin — CopE Loader</title>
+	<link rel="stylesheet" href="/app.css" />
+</head>
+<body>
+	<header>
+		<div class="brand">CopE<span>Loader</span> <span style="color:var(--muted);font-weight:400;font-size:13px">admin</span></div>
+		<a href="/">‹ Back to loader</a>
+	</header>
+	<main>
+		<section id="auth">
+			<h1>Admin access</h1>
+			<div class="card">
+				<div id="setupBox" class="hidden">
+					<p class="lead" style="margin-bottom:14px">First run — set a password (min 8 chars) to protect the admin console.</p>
+					<div class="row">
+						<input type="password" id="pwSetup" placeholder="New admin password" />
+						<button id="doSetup">Create</button>
+					</div>
+				</div>
+				<div id="loginBox" class="hidden">
+					<div class="row">
+						<input type="password" id="pwLogin" placeholder="Admin password" />
+						<button id="doLogin">Sign in</button>
+					</div>
+				</div>
+				<div id="authMsg" class="msg hidden"></div>
+			</div>
+		</section>
+
+		<section id="dash" class="hidden">
+			<div class="toolbar">
+				<input type="text" id="note" placeholder="Note / buyer name (optional)" class="grow" />
+				<select id="expiry">
+					<option value="">Never expires</option>
+					<option value="1h">1 hour</option>
+					<option value="1d">1 day</option>
+					<option value="7d">7 days</option>
+				</select>
+				<input type="number" id="count" value="1" min="1" max="100" style="max-width:90px" title="How many keys" />
+				<button id="generate">Generate keys</button>
+			</div>
+			<div id="genOut"></div>
+
+			<h2>Issued keys <span style="font-weight:400;color:var(--muted);font-size:12px" id="statline"></span>
+				<button class="secondary small" id="refresh" style="float:right">Refresh</button>
+			</h2>
+			<div class="card" style="padding:6px">
+				<table>
+					<thead>
+						<tr><th>Key</th><th>Note</th><th>Expires</th><th>Status</th><th>Uses</th><th>Last use</th><th></th></tr>
+					</thead>
+					<tbody id="rows"></tbody>
+				</table>
+				<p class="meta" id="empty" style="padding:10px">No keys yet.</p>
+			</div>
+
+			<h2>Hygiene</h2>
+			<div class="row" style="margin-top:4px">
+				<button class="secondary" id="logout">Sign out</button>
+			</div>
+		</section>
+	</main>
+	<script src="/admin.js"></script>
+</body>
+</html>

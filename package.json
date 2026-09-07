@@ -1,0 +1,18 @@
+{
+  "name": "cope-loader-site",
+  "version": "1.0.0",
+  "description": "Key-gated loader site with script packing and an admin console",
+  "private": true,
+  "main": "server.js",
+  "scripts": {
+    "start": "node server.js",
+    "test": "node test-flow.mjs"
+  },
+  "engines": {
+    "node": ">=22.5.0"
+  },
+  "dependencies": {
+    "express": "^4.19.2",
+    "pg": "^8.13.1"
+  }
+}
