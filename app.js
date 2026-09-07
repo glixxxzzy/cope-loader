@@ -146,16 +146,23 @@ app.post(
 	})
 );
 
-// The one-liner endpoint the seller's buyers loadstring. With no key it
-// returns the key-entry gate bootstrap (valid Luau); with a valid key it
-// returns the packed, self-decoding payload chunk - never the plaintext
-// script. Error responses are erroring chunks so loadstring still compiles
-// and the buyer sees an actual message instead of silence.
+// The one-liner endpoint the seller's buyers loadstring. Everything it
+// returns is a packed, self-decoding chunk of CSV bytes - browsing the URL
+// never reveals readable source. With no key it returns the packed key-gate
+// bootstrap (which collects the key in-game); with a valid key it returns the
+// packed payload chunk. Error responses are erroring chunks so loadstring
+// still compiles and the buyer sees an actual message instead of silence.
 function scriptStatusChunk(msg) {
 	return (
 		"-- CopE Loader: " + msg +
 		"\nerror(\"CopE Loader: " + String(msg).replace(/"/g, "") + "\")"
 	);
+}
+
+function packChunk(source) {
+	const seed = protect.seedFromToken(protect.randomToken());
+	const packed = protect.pack(source, seed);
+	return buildLoadstring(protect.blobToString(packed), seed);
 }
 
 app.get(
@@ -173,7 +180,11 @@ app.get(
 
 		const key = typeof req.query.key === "string" ? req.query.key.trim() : "";
 		if (!key) {
-			return res.status(200).type("text/plain").send(buildHttpGate(getBaseUrl(req)));
+			return res
+				.status(200)
+				.type("application/octet-stream")
+				.set("Content-Disposition", 'attachment; filename="c.dat"')
+				.send(packChunk(buildHttpGate(getBaseUrl(req))));
 		}
 
 		if (key.length > 64) {
@@ -201,12 +212,11 @@ app.get(
 				.type("text/plain")
 				.send(scriptStatusChunk("no script uploaded yet"));
 		}
-		const seed = protect.seedFromToken(protect.randomToken());
-		const packed = protect.pack(bytes.toString("utf8"), seed);
 		res
 			.status(200)
-			.type("text/plain")
-			.send(buildLoadstring(protect.blobToString(packed), seed));
+			.type("application/octet-stream")
+			.set("Content-Disposition", 'attachment; filename="lib.dat"')
+			.send(packChunk(bytes.toString("utf8")));
 	})
 );
 

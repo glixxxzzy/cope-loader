@@ -149,18 +149,25 @@ async function main() {
 	r = await fetch(BASE + "/scripts/main.luau");
 	check("payload not directly served (404)", r.status === 404);
 
-	// 13. one-liner endpoint: no key -> key-gate bootstrap (valid Luau, no plaintext)
+	// 13. one-liner endpoint: no key -> packed key-gate chunk (no readable source)
 	r = await fetch(BASE + "/api/script");
 	const gate = await r.text();
-	check("one-liner gate served", r.status === 200 && /^-- CopE Loader - one-liner key gate/.test(gate));
-	check("one-liner gate shows key page", gate.includes("CopELoaderGate") && gate.includes("Unlock"));
-	check("one-liner gate fetches url by key", gate.includes("/api/script?key="));
-	check("one-liner gate carries no plaintext payload", !gate.includes("Open Egg"));
+	check("one-liner gate served", r.status === 200 && /^-- CopE Loader - standalone loadstring build/.test(gate));
+	const gCsv = gate.match(/string\.split\("([^"]*)", ","\)/s);
+	const gSeed = gate.match(/local \w+ = (\d+)/);
+	const gateBack = gCsv && gSeed ? protect.unpack(gCsv[1], Number(gSeed[1])) : "";
+	check("one-liner gate unpacks to the key page", gateBack.includes("CopELoaderGate") && gateBack.includes("/api/script?key="));
+	check("one-liner gate hides its own source", !gate.includes("CopELoaderGate") && !gate.includes("local function"));
+	check("one-liner gate hides the payload", !gate.includes("Open Egg"));
 
-	// 14. one-liner endpoint: valid key -> packed standalone build, never plaintext
+	// 14. one-liner endpoint: valid key -> packed build, never plaintext
 	r = await fetch(BASE + "/api/script?key=" + encodeURIComponent(key));
 	const packedChunk = await r.text();
 	check("one-liner packed chunk served", r.status === 200 && packedChunk.includes("loadstring(table.concat"));
+	const pCsv = packedChunk.match(/string\.split\("([^"]*)", ","\)/s);
+	const pSeed = packedChunk.match(/local \w+ = (\d+)/);
+	const payloadBack = pCsv && pSeed ? protect.unpack(pCsv[1], Number(pSeed[1])) : "";
+	check("one-liner chunk decodes to the payload", payloadBack === src, (payloadBack || "").length + " vs " + src.length);
 	check("one-liner packed chunk hides the source", !packedChunk.includes("Open Egg"));
 
 	// 15. one-liner endpoint: bad key -> erroring chunk with a message
