@@ -2,15 +2,13 @@
   "version": 2,
   "functions": {
     "api/index.js": {
-      "includeFiles": [
-        "public/**",
-        "scripts/**",
-        "lib/**",
-        "config.json"
-      ]
+      "includeFiles": "{public/**,scripts/**,lib/**,config.json}"
     }
   },
   "rewrites": [
-    { "source": "/(.*)", "destination": "/api/index" }
+    {
+      "source": "/(.*)",
+      "destination": "/api/index"
+    }
   ]
 }
