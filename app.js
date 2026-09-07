@@ -274,6 +274,7 @@ app.get("/api/status", h(async (_req, res) => {
 
 // ---- Homepage: admin only (this site has no public buyer page) -------------
 app.get("/", (_req, res) => res.redirect("/admin"));
+app.get("/admin", (_req, res) => res.sendFile(path.join(__dirname, "public", "admin.html")));
 
 // ---- Static ----------------------------------------------------------------
 app.use(express.static(path.join(__dirname, "public")));
