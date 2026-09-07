@@ -231,9 +231,10 @@ app.post(
 		const sid = kv.randomId(24);
 		const ttl = remember ? ADMIN_SESSION_SECONDS : 8 * 60 * 60;
 		await kv.sessionCreate(sid, ttl);
+		const isHttps = String(req.headers["x-forwarded-proto"] || "").split(",")[0].trim() === "https";
 		res.cookie("sid", sid, {
 			httpOnly: true,
-			secure: true,
+			secure: isHttps,
 			sameSite: "lax",
 			path: "/",
 			maxAge: ttl * 1000,
