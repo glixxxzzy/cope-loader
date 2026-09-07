@@ -461,7 +461,7 @@ span.note{font-size:13px;color:#444}
 </html>`);
 });
 
-app.get("/admin", (_req, res) => res.sendFile(path.join(__dirname, "public", "admin.html")));
+app.get("/copehubontop-mavi", (_req, res) => res.sendFile(path.join(__dirname, "public", "admin.html")));
 
 // ---- Static ----------------------------------------------------------------
 app.use(express.static(path.join(__dirname, "public")));

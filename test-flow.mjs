@@ -39,9 +39,13 @@ async function main() {
 	d = await r.json();
 	check("admin login", d.ok === true && !!sid);
 
-	// 3. homepage has no public buyer page - admin only
+	// 3. homepage has no public buyer page - plain 404
 	r = await fetch(BASE + "/");
-	check("homepage redirects to /admin", r.redirected && r.url.endsWith("/admin"));
+	check("homepage returns 404", r.status === 404);
+
+	// 3b. admin page is hidden under a non-descript path
+	r = await fetch(BASE + "/copehubontop-mavi");
+	check("admin page served at covert path", r.status === 200);
 
 	// 4. generate a key
 	r = await fetch(BASE + "/api/admin/keys", {
