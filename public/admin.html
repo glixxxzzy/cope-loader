@@ -70,6 +70,19 @@
 				<b>one-liner</b> once and hand it to everyone — the key page opens in the executor and validates on the server when
 				the key is submitted. Revoking a key kills any snippet that carries it.</p>
 
+			<h2>Execution log <span style="font-weight:400;color:var(--muted);font-size:12px" id="teleStat"></span>
+				<button class="secondary small" id="refreshTele" style="float:right">Refresh</button>
+			</h2>
+			<div class="card" style="padding:6px">
+				<table>
+					<thead>
+						<tr><th>User</th><th>UserId</th><th>Executor</th><th>Key</th><th>Time</th></tr>
+					</thead>
+					<tbody id="teleRows"></tbody>
+				</table>
+				<p class="meta" id="teleEmpty" style="padding:10px">No executions logged yet.</p>
+			</div>
+
 			<h2>Offline build <span style="font-weight:400;color:var(--muted);font-size:12px">(no server, no key)</span></h2>
 			<p class="meta">Turns a Luau script into a single self-contained <code>loadstring</code> build — no server, no key. Useful for testing the payload without the loader site.</p>
 			<textarea id="convSrc" rows="6" placeholder="Paste your Luau script here…"></textarea>

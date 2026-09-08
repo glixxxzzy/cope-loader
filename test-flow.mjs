@@ -243,6 +243,37 @@ async function main() {
 	r = await fetch(BASE + "/api/admin/keys/" + encodeURIComponent(key) + "/oneline", { headers: { Cookie: "sid=" + sid } });
 	d = await r.json();
 	check("per-key one-liner returned", d.ok === true && d.line.includes("/api/script?key=" + encodeURIComponent(key)));
+
+	// 17. telemetry endpoint - fire-and-forget logs an execution
+	r = await fetch(BASE + "/api/telemetry", {
+		method: "POST",
+		headers: { "Content-Type": "application/json", "User-Agent": "Roblox:Executor/1.0" },
+		body: JSON.stringify({ username: "TestUser", userId: "12345", executor: "Synapse X", key }),
+	});
+	d = await r.json();
+	check("telemetry accepted", d.ok === true);
+
+	// 18. telemetry shows up in the admin log
+	r = await fetch(BASE + "/api/admin/telemetry", { headers: { Cookie: "sid=" + sid } });
+	d = await r.json();
+	const foundTele = (d.telemetry || []).find((t) => t.username === "TestUser");
+	check("telemetry logged (username)", !!foundTele && foundTele.user_id === "12345");
+	check("telemetry logged (executor)", !!foundTele && foundTele.executor === "Synapse X");
+	check("telemetry total reported", typeof d.total === "number" && d.total >= 1);
+
+	// 19. telemetry rejects browser UAs (no log spam from Chrome)
+	r = await fetch(BASE + "/api/telemetry", {
+		method: "POST",
+		headers: { "Content-Type": "application/json", "User-Agent": "Mozilla/5.0 (Windows NT 10.0)" },
+		body: JSON.stringify({ username: "BrowserBot", userId: "999", executor: "Chrome", key: "x" }),
+	});
+	check("telemetry rejects browser UA", r.status === 404);
+
+	// 20. keyed loader chunk embeds the telemetry beacon
+	r = await fetch(BASE + "/api/admin/keys/" + encodeURIComponent(key) + "/loader", { headers: { Cookie: "sid=" + sid } });
+	d = await r.json();
+	check("keyed loader embeds telemetry beacon", d.ok === true && d.loader.includes("/api/telemetry"));
+	check("keyed loader embeds username collection", d.ok === true && d.loader.includes(".LocalPlayer"));
 }
 
 main().catch((e) => {

@@ -121,7 +121,7 @@ app.use((req, res, next) => {
 	res.setHeader("Permissions-Policy", "camera=(), microphone=(), geolocation=()");
 	res.setHeader(
 		"Content-Security-Policy",
-		"default-src 'none'; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self'; connect-src 'self'; base-uri 'none'; form-action 'self'; frame-ancestors 'none'"
+		"default-src 'none'; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' https://*.roblox.com; connect-src 'self'; base-uri 'none'; form-action 'self'; frame-ancestors 'none'"
 	);
 	next();
 });
@@ -311,6 +311,7 @@ app.get(
 				base: getBaseUrl(req),
 				count: parts.length,
 				seeds: parts.map((p) => p.seed),
+				key,
 			};
 			const templatePath = path.join(__dirname, "scripts", "fetcher.obf.luau");
 			const l3Bootstrap =
@@ -575,6 +576,45 @@ app.get("/api/admin/stats", requireAdmin, h(async (_req, res) => {
 		uses: list.reduce((s, r) => s + (Number(r.uses) || 0), 0),
 		payloadBytes: getScriptBytes().length,
 	});
+}));
+
+// ---- Telemetry ---------------------------------------------------------------
+// POST /api/telemetry — fire-and-forget from the executor-side loader.
+// No auth (executors don't carry cookies); rate-limited per IP; browser
+// requests are rejected; payload is validated and stored.
+const TELEMETRY_LIMIT_PER_MIN = Number(process.env.TELEMETRY_RATE_LIMIT || config.telemetryRateLimit || 30);
+
+app.post("/api/telemetry", h(async (req, res) => {
+	if (isBrowser(req)) {
+		return res.status(404).json({ ok: false, error: "not found" });
+	}
+	const ip = clientIp(req);
+	if (!(await kv.redeemAllowed(ip, TELEMETRY_LIMIT_PER_MIN))) {
+		return res.status(429).json({ ok: false, error: "rate limited" });
+	}
+	const { username, userId, executor, key } = req.body || {};
+	const safeName = String(username || "").replace(/[^\w\-\s.]/g, "").slice(0, 64);
+	const safeUid = String(userId || "").replace(/[^\d\-]/g, "").slice(0, 32);
+	const safeExec = String(executor || "").replace(/[^\w\-\s.#]/g, "").slice(0, 64);
+	const safeKey = String(key || "").replace(/[^\w\-]/g, "").slice(0, 64);
+	if (!safeName && !safeUid) {
+		return res.status(400).json({ ok: false, error: "invalid payload" });
+	}
+	await kv.addTelemetry({
+		time: new Date().toISOString(),
+		username: safeName,
+		userId: safeUid,
+		executor: safeExec,
+		key: safeKey,
+	});
+	res.json({ ok: true });
+}));
+
+// GET /api/admin/telemetry — admin-only list of execution logs.
+app.get("/api/admin/telemetry", requireAdmin, h(async (req, res) => {
+	const limit = Math.min(Math.max(parseInt(req.query.limit, 10) || 200, 1), 1000);
+	const rows = await kv.listTelemetry(limit);
+	res.json({ ok: true, telemetry: rows, total: await kv.telemetryCount() });
 }));
 
 // ---- Admin first-run password setup ----------------------------------------

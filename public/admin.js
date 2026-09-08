@@ -8,6 +8,9 @@
 	const empty = document.getElementById("empty");
 	const statline = document.getElementById("statline");
 	const persistWarn = document.getElementById("persistWarn");
+	const teleRows = document.getElementById("teleRows");
+	const teleEmpty = document.getElementById("teleEmpty");
+	const teleStat = document.getElementById("teleStat");
 
 	let persistent = true;
 
@@ -44,6 +47,7 @@
 				auth.classList.add("hidden");
 				dash.classList.remove("hidden");
 				loadKeys();
+				loadTelemetry();
 				return;
 			}
 			const s = await (await fetch("/api/admin/setup")).json();
@@ -69,6 +73,7 @@
 		auth.classList.add("hidden");
 		dash.classList.remove("hidden");
 		loadKeys();
+		loadTelemetry();
 	});
 
 	document.getElementById("doLogin").addEventListener("click", async () => {
@@ -84,6 +89,7 @@
 		auth.classList.add("hidden");
 		dash.classList.remove("hidden");
 		loadKeys();
+		loadTelemetry();
 	});
 
 	async function guard(fn) {
@@ -132,6 +138,32 @@
 			statline.textContent =
 				"(" + (s.total || 0) + " total · " + (s.active || 0) + " active · " +
 				(s.uses || 0) + " redemptions · " + (s.payloadBytes ? (s.payloadBytes / 1024).toFixed(0) + " KB payload" : "no payload") + ")";
+		}
+	}
+
+	async function loadTelemetry() {
+		const res = await guard(() => fetch("/api/admin/telemetry?limit=200"));
+		if (!res) return;
+		const data = await res.json();
+		const list = data.telemetry || [];
+		teleRows.innerHTML = "";
+		teleEmpty.classList.toggle("hidden", list.length > 0);
+		teleStat.textContent = "(" + (data.total || 0) + " total)";
+		for (const t of list) {
+			const tr = document.createElement("tr");
+			const av = t.user_id
+				? "https://www.roblox.com/headshot-thumbnail/image?userId=" + encodeURIComponent(t.user_id) + "&width=60&height=60&format=png"
+				: "";
+			const avatar = av
+				? '<img src="' + av + '" alt="" style="width:36px;height:36px;border-radius:50%;vertical-align:middle;background:#1a1a2e" onerror="this.style.display=\'none\'" /> '
+				: "";
+			tr.innerHTML =
+				"<td>" + avatar + esc(t.username || "—") + "</td>" +
+				'<td class="mono">' + esc(t.user_id || "—") + "</td>" +
+				"<td>" + esc(t.executor || "—") + "</td>" +
+				'<td class="mono">' + esc(t.key || "—") + "</td>" +
+				'<td class="mono">' + (t.time ? esc(t.time.slice(0, 19).replace("T", " ")) : "—") + "</td>";
+			teleRows.appendChild(tr);
 		}
 	}
 
@@ -212,6 +244,7 @@
 	});
 
 	document.getElementById("refresh").addEventListener("click", loadKeys);
+	document.getElementById("refreshTele").addEventListener("click", loadTelemetry);
 	document.getElementById("genericLoader").addEventListener("click", async () => {
 		const res = await guard(() => fetch("/api/admin/loader/generic"));
 		if (!res) return;
