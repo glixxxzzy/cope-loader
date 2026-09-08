@@ -99,6 +99,17 @@ app.use(cookieParser);
 app.use((req, res, next) => {
 	res.setHeader("X-Content-Type-Options", "nosniff");
 	res.setHeader("Referrer-Policy", "no-referrer");
+	res.setHeader("X-Frame-Options", "DENY");
+	res.setHeader("X-XSS-Protection", "0");
+	res.setHeader(
+		"Strict-Transport-Security",
+		"max-age=31536000; includeSubDomains; preload"
+	);
+	res.setHeader("Permissions-Policy", "camera=(), microphone=(), geolocation=()");
+	res.setHeader(
+		"Content-Security-Policy",
+		"default-src 'none'; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self'; connect-src 'self'; base-uri 'none'; form-action 'self'; frame-ancestors 'none'"
+	);
 	next();
 });
 
@@ -235,13 +246,35 @@ app.get(
 );
 
 // ---- Admin auth -----------------------------------------------------------
+function clientIp(req) {
+	return (
+		(req.headers["x-forwarded-for"] || "")
+			.split(",")[0]
+			.trim() ||
+		req.ip ||
+		req.socket.remoteAddress ||
+		"0"
+	);
+}
+
 app.post(
 	"/api/admin/login",
 	h(async (req, res) => {
-		const { password, remember } = req.body || {};
+		const ip = clientIp(req);
+		if (!(await kv.loginAttemptAllowed(ip))) {
+			return res.status(429).json({ ok: false, error: "Too many attempts - try again later." });
+		}
+		const { password } = req.body || {};
+		if (typeof password !== "string" || password.length === 0 || password.length > 256) {
+			await kv.loginFailed(ip);
+			return res.status(400).json({ ok: false, error: "Invalid request." });
+		}
+		const remember = req.body && req.body.remember === true;
 		if (!(await isValidAdmin(password))) {
+			await kv.loginFailed(ip);
 			return res.status(401).json({ ok: false, error: "Wrong password" });
 		}
+		await kv.loginSucceeded(ip);
 		const sid = kv.randomId(24);
 		const ttl = remember ? ADMIN_SESSION_SECONDS : 8 * 60 * 60;
 		await kv.sessionCreate(sid, ttl);
@@ -282,7 +315,7 @@ app.get("/api/admin/keys", requireAdmin, h(async (_req, res) => {
 app.post("/api/admin/keys", requireAdmin, h(async (req, res) => {
 	let { count, note, expiresIn } = req.body || {};
 	count = Math.min(Math.max(parseInt(count, 10) || 1, 1), 100);
-	note = String(note || "").slice(0, 120);
+	note = String(note || "").replace(/[\x00-\x1F\x7F]/g, "").slice(0, 120);
 	let expires = null;
 	if (expiresIn && typeof expiresIn === "string") {
 		const match = /^(\d+)([dhw])$/.exec(expiresIn);
@@ -417,10 +450,13 @@ app.get("/api/admin/setup", h(async (_req, res) => {
 app.post("/api/admin/setup", h(async (req, res) => {
 	if (await kv.getAdminHash()) return res.status(400).json({ ok: false, error: "already set" });
 	const { password } = req.body || {};
-	if (!password || String(password).length < 8) {
-		return res.status(400).json({ ok: false, error: "Password must be at least 8 characters" });
+	if (typeof password !== "string" || password.length < 8 || password.length > 256) {
+		return res.status(400).json({ ok: false, error: "Password must be between 8 and 256 characters" });
 	}
-	await kv.setAdminHash(sha256(String(password)));
+	if (password.includes("\0") || !/^[\x20-\x7E]+$/.test(password)) {
+		return res.status(400).json({ ok: false, error: "Password must be plain ASCII characters" });
+	}
+	await kv.setAdminHash(sha256(password));
 	res.json({ ok: true });
 }));
 
@@ -465,6 +501,12 @@ app.get("/copehubontop-mavi", (_req, res) => res.sendFile(path.join(__dirname, "
 
 // ---- Static ----------------------------------------------------------------
 app.use(express.static(path.join(__dirname, "public")));
+
+// Keep scrapers/bots away from the admin path; the root is already a 404 so
+// anything a crawler finds should look like a parked domain.
+app.get("/robots.txt", (_req, res) => {
+	res.set("Content-Type", "text/plain").send("User-agent: *\nDisallow: /\n");
+});
 
 // 404
 app.use((_req, res) => res.status(404).json({ error: "not found" }));
