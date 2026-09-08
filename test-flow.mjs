@@ -178,31 +178,56 @@ async function main() {
 	const pCsv = packedChunk.match(/string\.split\("([^"]*)", ","\)/s);
 	const pSeed = packedChunk.match(/local \w+ = (\d+)/);
 	const bootstrap = pCsv && pSeed ? protect.unpack(pCsv[1], Number(pSeed[1])) : "";
-	check("bootstrap unpacks to the parts fetcher", bootstrap.includes("/api/part?t="));
+	check("bootstrap unpacks to a parts fetcher", /COPE_FETCH\(|api\/part/.test(bootstrap));
 
-	const tMatch = bootstrap.match(/local \w+ = "([0-9a-f]+)"/);
-	const nMatch = bootstrap.match(/local \w+ = (\d+)/);
-	check("bootstrap carries session token and part count", !!tMatch && !!nMatch);
-	const partCount = nMatch ? Number(nMatch[1]) : 0;
-	check("part count matches config", partCount === (JSON.parse(fs.readFileSync("config.json", "utf8")).parts || 4));
+	// Parse the bootstrap. Two shapes are accepted:
+	//   Layer 3 (obfuscated template) : local _src = COPE_FETCH("<token>", {s1,s2,..}, N, "<base>")
+	//   Layer 2 (plaintext fetcher)   : local T="<hex>" / seeds table + count
+	const tMatch3 = bootstrap.match(/COPE_FETCH\(\s*"([0-9a-f]+)"\s*,\s*\{([^}]*)\}\s*,\s*(\d+)/);
+	const tMatch2 =
+		bootstrap.match(/local \w+ = "([0-9a-f]+)"/) &&
+		bootstrap.match(/local \w+ = (\d+)/);
+	if (tMatch3) {
+		const token = tMatch3[1];
+		const seeds3 = tMatch3[2].split(",").map((s) => Number(s.trim()));
+		const partCount3 = Number(tMatch3[3]);
+		check("bootstrap carries session token and part count", !!token && partCount3 >= 2);
+		check("part count matches config", partCount3 === (JSON.parse(fs.readFileSync("config.json", "utf8")).parts || 4));
+		check("bootstrap embeds per-part seeds", seeds3.length === partCount3 && seeds3.every((n) => Number.isFinite(n)));
+		check("bootstrap logic hides readable fetch code (Layer 3)", !bootstrap.includes("/api/part?t=") && !bootstrap.includes('"api/part'));
 
-	// harvest the per-part seeds that the bootstrap embeds
-	const seedLines = [...bootstrap.matchAll(/\[\d+\]\s*=\s*(-?\d+)[\s,]*/g)];
-	const seedList = seedLines.map((m) => Number(m[1]));
-	check("bootstrap embeds per-part seeds", seedList.length === partCount && seedList.every((n) => Number.isFinite(n)));
-
-	const reassembled = [];
-	for (let i = 1; i <= partCount; i++) {
-		const pr = await fetch(BASE + "/api/part?t=" + tMatch[1] + "&i=" + i);
-		const partCsv = await pr.text();
-		check("part " + i + " served", pr.status === 200 && partCsv.split(",").length > 100);
-		const embeddedSeed = seedList[i - 1];
-		check("part has a stored seed", Number.isFinite(embeddedSeed));
-		reassembled.push(protect.unpack(partCsv, embeddedSeed));
+		const reassembled = [];
+		for (let i = 1; i <= partCount3; i++) {
+			const pr = await fetch(BASE + "/api/part?t=" + token + "&i=" + i);
+			const partCsv = await pr.text();
+			check("part " + i + " served", pr.status === 200 && partCsv.split(",").length > 100);
+			const embeddedSeed = seeds3[i - 1];
+			check("part has a stored seed", Number.isFinite(embeddedSeed));
+			reassembled.push(protect.unpack(partCsv, embeddedSeed));
+		}
+		const fullBack = reassembled.join("");
+		check("multi-part reassembly equals the obfuscated payload", fullBack === src, fullBack.length + " vs " + src.length);
+	} else if (tMatch2) {
+		const partCount = Number(tMatch2[2]);
+		const seedLines = [...bootstrap.matchAll(/\[\d+\]\s*=\s*(-?\d+)[\s,]*/g)];
+		const seedList = seedLines.map((m) => Number(m[1]));
+		check("bootstrap embeds per-part seeds", seedList.length === partCount && seedList.every((n) => Number.isFinite(n)));
+		const reassembled = [];
+		for (let i = 1; i <= partCount; i++) {
+			const pr = await fetch(BASE + "/api/part?t=" + tMatch2[1] + "&i=" + i);
+			const partCsv = await pr.text();
+			check("part " + i + " served", pr.status === 200 && partCsv.split(",").length > 100);
+			const embeddedSeed = seedList[i - 1];
+			check("part has a stored seed", Number.isFinite(embeddedSeed));
+			reassembled.push(protect.unpack(partCsv, embeddedSeed));
+		}
+		const fullBack = reassembled.join("");
+		check("multi-part reassembly equals the obfuscated payload", fullBack === src, fullBack.length + " vs " + src.length);
+	} else {
+		check("bootstrap carries session token and part count", false);
 	}
-	const fullBack = reassembled.join("");
-	check("multi-part reassembly equals the obfuscated payload", fullBack === src, fullBack.length + " vs " + src.length);
 	check("one-liner packed chunk hides the source", !packedChunk.includes("Open Egg"));
+	check("one-liner packed chunk hides readable fetcher logic", !packedChunk.includes("/api/part?t="));
 
 	// 15. one-liner endpoint: bad key -> erroring chunk with a message
 	r = await fetch(BASE + "/api/script?key=KEY-NOPE");

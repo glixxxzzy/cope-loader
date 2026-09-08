@@ -7,6 +7,7 @@ const crypto = require("crypto");
 const protect = require("./lib/protect");
 const kv = require("./lib/kv");
 const { buildLoader, buildHttpGate, buildLoadstring, buildPartsBootstrap } = require("./lib/loader");
+const obfuscate = require("./lib/obfuscate");
 
 const CONFIG_PATH = path.join(__dirname, "config.json");
 
@@ -182,6 +183,10 @@ function scriptStatusChunk(msg) {
 	);
 }
 
+// Pack a Luau chunk into a self-decoding loadstring (the on-wire obfuscation:
+// every response is opaque packed bytes). Layer 3 source obfuscation is applied
+// upstream - the payload is main.obf.luau and the parts bootstrap is built from
+// the pre-obfuscated fetcher.obf.luau template - so no Clyde work happens here.
 function packChunk(source) {
 	const seed = protect.seedFromToken(protect.randomToken());
 	const packed = protect.pack(source, seed);
@@ -295,16 +300,24 @@ app.get(
 		// One-time delivery session: a fresh token, and the payload split into
 		// PART_COUNT separately-packed parts. The returned bootstrap fetches
 		// each part from /api/part inside the token's short TTL, so no single
-		// HTTP response ever contains the whole script.
+		// HTTP response ever contains the whole script. When the pre-obfuscated
+		// fetcher template is available (Layer 3), the bootstrap logic is that
+		// scramble; otherwise it falls back to the plaintext parts fetcher.
 		const token = kv.randomId(24);
 		try {
 			const parts = await makePartSession(token, PART_COUNT);
-			const bootstrap = buildPartsBootstrap({
+			const cfg = {
 				token,
 				base: getBaseUrl(req),
 				count: parts.length,
 				seeds: parts.map((p) => p.seed),
-			});
+			};
+			const templatePath = path.join(__dirname, "scripts", "fetcher.obf.luau");
+			const l3Bootstrap =
+				config.obfuscateChunks !== false
+					? await obfuscate.assembleFetcherChunk(cfg, templatePath)
+					: null;
+			const bootstrap = l3Bootstrap || buildPartsBootstrap(cfg);
 			res
 				.status(200)
 				.type("application/octet-stream")

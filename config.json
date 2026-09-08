@@ -2,5 +2,6 @@
   "port": 3300,
   "redeemRateLimit": 10,
   "obfuscatePayload": true,
+  "obfuscateChunks": true,
   "parts": 4
 }
