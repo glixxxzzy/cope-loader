@@ -75,9 +75,12 @@ async function main() {
 	});
 	d = await r.json();
 	check("good key redeemed", d.ok === true && !!d.blob && !!d.seed);
-	const src = fs.readFileSync("scripts/main.luau", "utf8");
+	const cfg = JSON.parse(fs.readFileSync("config.json", "utf8"));
+	const obfOn = cfg.obfuscatePayload !== false && fs.existsSync("scripts/main.obf.luau");
+	const src = fs.readFileSync(obfOn ? "scripts/main.obf.luau" : "scripts/main.luau", "utf8");
 	const back = protect.unpack(d.blob, d.seed);
-	check("blob unpacks to exact payload", back === src, back.length + " vs " + src.length);
+	check("blob unpacks to the served payload (obfuscated)", back === src, back.length + " vs " + src.length);
+	check("served payload hides readable source", obfOn ? !back.includes("Cope Hub v5") && !back.includes("--[[") && !back.includes("print(") : true);
 
 	// 7. same key can redeem again (unlimited re-issue)
 	const prevBlob = d.blob;
@@ -164,14 +167,41 @@ async function main() {
 	check("one-liner gate hides its own source", !gate.includes("CopELoaderGate") && !gate.includes("local function"));
 	check("one-liner gate hides the payload", !gate.includes("Open Egg"));
 
-	// 14. one-liner endpoint: valid key -> packed build, never plaintext
+	// 14. one-liner endpoint: valid key -> multi-part bootstrap, never plaintext
 	r = await fetch(BASE + "/api/script?key=" + encodeURIComponent(key));
 	const packedChunk = await r.text();
 	check("one-liner packed chunk served", r.status === 200 && packedChunk.includes("loadstring(table.concat"));
+	check("one-liner never embeds the whole payload", !packedChunk.includes(src) && packedChunk.length < src.length / 2);
+
+	// unpack the bootstrap chunk, then emulate the executor: fetch each part
+	// with the session token and reassemble the obfuscated payload.
 	const pCsv = packedChunk.match(/string\.split\("([^"]*)", ","\)/s);
 	const pSeed = packedChunk.match(/local \w+ = (\d+)/);
-	const payloadBack = pCsv && pSeed ? protect.unpack(pCsv[1], Number(pSeed[1])) : "";
-	check("one-liner chunk decodes to the payload", payloadBack === src, (payloadBack || "").length + " vs " + src.length);
+	const bootstrap = pCsv && pSeed ? protect.unpack(pCsv[1], Number(pSeed[1])) : "";
+	check("bootstrap unpacks to the parts fetcher", bootstrap.includes("/api/part?t="));
+
+	const tMatch = bootstrap.match(/local \w+ = "([0-9a-f]+)"/);
+	const nMatch = bootstrap.match(/local \w+ = (\d+)/);
+	check("bootstrap carries session token and part count", !!tMatch && !!nMatch);
+	const partCount = nMatch ? Number(nMatch[1]) : 0;
+	check("part count matches config", partCount === (JSON.parse(fs.readFileSync("config.json", "utf8")).parts || 4));
+
+	// harvest the per-part seeds that the bootstrap embeds
+	const seedLines = [...bootstrap.matchAll(/\[\d+\]\s*=\s*(-?\d+)[\s,]*/g)];
+	const seedList = seedLines.map((m) => Number(m[1]));
+	check("bootstrap embeds per-part seeds", seedList.length === partCount && seedList.every((n) => Number.isFinite(n)));
+
+	const reassembled = [];
+	for (let i = 1; i <= partCount; i++) {
+		const pr = await fetch(BASE + "/api/part?t=" + tMatch[1] + "&i=" + i);
+		const partCsv = await pr.text();
+		check("part " + i + " served", pr.status === 200 && partCsv.split(",").length > 100);
+		const embeddedSeed = seedList[i - 1];
+		check("part has a stored seed", Number.isFinite(embeddedSeed));
+		reassembled.push(protect.unpack(partCsv, embeddedSeed));
+	}
+	const fullBack = reassembled.join("");
+	check("multi-part reassembly equals the obfuscated payload", fullBack === src, fullBack.length + " vs " + src.length);
 	check("one-liner packed chunk hides the source", !packedChunk.includes("Open Egg"));
 
 	// 15. one-liner endpoint: bad key -> erroring chunk with a message

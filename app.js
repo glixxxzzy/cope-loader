@@ -6,10 +6,9 @@ const crypto = require("crypto");
 
 const protect = require("./lib/protect");
 const kv = require("./lib/kv");
-const { buildLoader, buildHttpGate, buildLoadstring } = require("./lib/loader");
+const { buildLoader, buildHttpGate, buildLoadstring, buildPartsBootstrap } = require("./lib/loader");
 
 const CONFIG_PATH = path.join(__dirname, "config.json");
-const SCRIPT_PATH = process.env.SCRIPT_PATH || path.join(__dirname, "scripts", "main.luau");
 
 const config = (() => {
 	try {
@@ -18,6 +17,19 @@ const config = (() => {
 		return {};
 	}
 })();
+
+function resolveScriptPath() {
+	const override = process.env.SCRIPT_PATH;
+	if (override) return override;
+	const base = path.join(__dirname, "scripts");
+	const obf = path.join(base, "main.obf.luau");
+	if (config.obfuscatePayload !== false && fs.existsSync(obf)) return obf;
+	return path.join(base, "main.luau");
+}
+const SCRIPT_PATH = resolveScriptPath();
+
+const PART_COUNT = Math.min(Math.max(Number(process.env.PART_COUNT || config.parts || 4), 2), 8);
+const PART_TTL_SECONDS = Number(process.env.PART_TTL_SECONDS || config.partTtlSeconds || 120);
 
 const REDEEM_LIMIT_PER_MIN = Number(
 	process.env.REDEEM_RATE_LIMIT || config.redeemRateLimit || 10
@@ -176,6 +188,48 @@ function packChunk(source) {
 	return buildLoadstring(protect.blobToString(packed), seed);
 }
 
+// Split the payload into N non-overlapping byte parts (boundary-safe UTF-8
+// splits so reassembly is byte-identical to the original file).
+function splitBytes(buf, n) {
+	const parts = [];
+	if (n <= 1 || buf.length === 0) {
+		parts.push(buf);
+		return parts;
+	}
+	const size = Math.ceil(buf.length / n);
+	for (let i = 0; i < n; i++) {
+		parts.push(buf.subarray(i * size, Math.min(buf.length, (i + 1) * size)));
+	}
+	return parts.filter((p) => p.length > 0);
+}
+
+// Random per-part seed, minted per session and stored server-side (never
+// derivable from the token), so a captured part URL decrypts nothing without
+// the stored seed list.
+function randomPartSeed() {
+	return protect.seedFromToken(protect.randomToken());
+}
+
+// Materialize the split, per-part packed CSV bundles for a freshly minted
+// one-time delivery session. Random seeds are persisted under `token`.
+async function makePartSession(token, count) {
+	const parts = splitBytes(getScriptBytes(), count);
+	const seeds = parts.map(randomPartSeed);
+	await kv.partSessionCreate(token, JSON.stringify(seeds), PART_TTL_SECONDS);
+	return parts.map((part, i) => ({
+		index: i + 1,
+		seed: seeds[i],
+		packed: protect.pack(part.toString("utf8"), seeds[i]),
+		bytes: part.length,
+	}));
+}
+
+async function getStoredPartSeeds(token) {
+	const raw = await kv.partSessionGet(token);
+	if (!raw) return null;
+	return JSON.parse(raw);
+}
+
 // Returns true when the request came from a real web browser. The executor's
 // game:HttpGet goes through Roblox's HTTP stack and never sends a browser UA,
 // so this blocks "open the URL in Chrome and download the code" while the
@@ -237,11 +291,79 @@ app.get(
 				.type("text/plain")
 				.send(scriptStatusChunk("no script uploaded yet"));
 		}
+
+		// One-time delivery session: a fresh token, and the payload split into
+		// PART_COUNT separately-packed parts. The returned bootstrap fetches
+		// each part from /api/part inside the token's short TTL, so no single
+		// HTTP response ever contains the whole script.
+		const token = kv.randomId(24);
+		try {
+			const parts = await makePartSession(token, PART_COUNT);
+			const bootstrap = buildPartsBootstrap({
+				token,
+				base: getBaseUrl(req),
+				count: parts.length,
+				seeds: parts.map((p) => p.seed),
+			});
+			res
+				.status(200)
+				.type("application/octet-stream")
+				.set("Content-Disposition", 'attachment; filename="lib.dat"')
+				.send(packChunk(bootstrap));
+		} catch {
+			// parts table missing (fresh db) -> fall back to the old single chunk
+			return res
+				.status(200)
+				.type("application/octet-stream")
+				.set("Content-Disposition", 'attachment; filename="lib.dat"')
+				.send(packChunk(bytes.toString("utf8")));
+		}
+	})
+);
+
+// One payload part of a one-time session. The token only needs to exist and
+// be unexpired; a part URL is useless on its own because each part carries a
+// token-derived keystream and re-building the source requires the matching
+// seed from the bootstrap that minted the session.
+app.get(
+	"/api/part",
+	h(async (req, res) => {
+		res.setHeader("Cache-Control", "no-store");
+
+		if (isBrowser(req)) {
+			return res.status(404).type("text/plain").send("not found");
+		}
+
+		const token = typeof req.query.t === "string" ? req.query.t : "";
+		const index = parseInt(req.query.i, 10);
+		if (!token || !Number.isFinite(index) || index < 1) {
+			return res.status(400).type("text/plain").send("bad request");
+		}
+		const seeds = await getStoredPartSeeds(token);
+		if (!seeds) {
+			return res.status(403).type("text/plain").send("session expired");
+		}
+
+		const bytes = getScriptBytes();
+		if (bytes.length === 0) {
+			return res.status(500).type("text/plain").send("no script yet");
+		}
+		const parts = splitBytes(bytes, PART_COUNT);
+		const part = parts[index - 1];
+		if (!part || part.length === 0) {
+			return res.status(404).type("text/plain").send("no such part");
+		}
+
+		const seed = seeds[index - 1];
+		if (!Number.isFinite(seed)) {
+			return res.status(404).type("text/plain").send("no such part");
+		}
+		const packed = protect.pack(part.toString("utf8"), seed);
 		res
 			.status(200)
 			.type("application/octet-stream")
-			.set("Content-Disposition", 'attachment; filename="lib.dat"')
-			.send(packChunk(bytes.toString("utf8")));
+			.set("Content-Disposition", `attachment; filename="p${index}.dat"`)
+			.send(protect.blobToString(packed));
 	})
 );
 

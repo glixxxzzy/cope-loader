@@ -6,7 +6,8 @@
   "main": "server.js",
   "scripts": {
     "start": "node server.js",
-    "test": "node test-flow.mjs"
+    "test": "node test-flow.mjs",
+    "obfuscate": "node scripts/obfuscate.mjs"
   },
   "engines": {
     "node": ">=22.5.0"
@@ -17,5 +18,8 @@
   },
   "overrides": {
     "qs": "^6.16.0"
+  },
+  "devDependencies": {
+    "@gamely/prometheus-cli": "^0.0.9"
   }
 }

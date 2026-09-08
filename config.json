@@ -1,4 +1,6 @@
 {
   "port": 3300,
-  "redeemRateLimit": 10
+  "redeemRateLimit": 10,
+  "obfuscatePayload": true,
+  "parts": 4
 }
