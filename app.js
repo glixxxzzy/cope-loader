@@ -37,6 +37,100 @@ const REDEEM_LIMIT_PER_MIN = Number(
 );
 const ADMIN_SESSION_SECONDS = Number(process.env.ADMIN_SESSION_SECONDS || 30 * 24 * 60 * 60);
 
+// ---- GitHub OAuth (the only admin login) ------------------------------------
+// Admin access is granted by signing in with GitHub. An account is allowed only
+// when its login appears in GITHUB_ALLOWED_USERS (or its numeric id in
+// GITHUB_ALLOWED_IDS). Everyone else is rejected, no password involved.
+const GH_AUTHORIZE_BASE = String(process.env.GITHUB_AUTHORIZE_BASE || "https://github.com").replace(/\/+$/, "");
+const GH_TOKEN_BASE = String(process.env.GITHUB_TOKEN_BASE || "https://github.com").replace(/\/+$/, "");
+const GH_API_BASE = String(process.env.GITHUB_API_BASE || "https://api.github.com").replace(/\/+$/, "");
+const GH_CLIENT_ID = process.env.GITHUB_CLIENT_ID || "";
+const GH_CLIENT_SECRET = process.env.GITHUB_CLIENT_SECRET || "";
+
+function authConfigured() {
+	return !!(GH_CLIENT_ID && GH_CLIENT_SECRET && (process.env.GITHUB_ALLOWED_USERS || process.env.GITHUB_ALLOWED_IDS));
+}
+
+function ghCallbackUrl(req) {
+	if (process.env.PUBLIC_BASE_URL) {
+		return process.env.PUBLIC_BASE_URL.replace(/\/+$/, "") + "/auth/github/callback";
+	}
+	const proto = String(req.headers["x-forwarded-proto"] || "").split(",")[0].trim() || (req.secure ? "https" : "http");
+	return proto + "://" + (req.headers.host || "localhost") + "/auth/github/callback";
+}
+
+function ghAllowedUser(user) {
+	if (!user || !user.login) return false;
+	const logins = String(process.env.GITHUB_ALLOWED_USERS || "")
+		.split(",")
+		.map((s) => s.trim().toLowerCase())
+		.filter(Boolean);
+	const ids = String(process.env.GITHUB_ALLOWED_IDS || "")
+		.split(",")
+		.map((s) => s.trim())
+		.filter(Boolean);
+	return (
+		logins.includes(String(user.login).toLowerCase()) ||
+		(ids.length > 0 && ids.includes(String(user.id)))
+	);
+}
+
+async function ghExchangeCode(code, redirectUri) {
+	const r = await fetch(GH_TOKEN_BASE + "/login/oauth/access_token", {
+		method: "POST",
+		headers: { "Content-Type": "application/json", Accept: "application/json" },
+		body: JSON.stringify({
+			client_id: GH_CLIENT_ID,
+			client_secret: GH_CLIENT_SECRET,
+			code,
+			redirect_uri: redirectUri,
+		}),
+	});
+	if (!r.ok) return null;
+	const d = await r.json();
+	return d.access_token || null;
+}
+
+async function ghFetchUser(token) {
+	const r = await fetch(GH_API_BASE + "/user", {
+		headers: {
+			Authorization: "Bearer " + token,
+			Accept: "application/vnd.github+json",
+			"User-Agent": "cope-loader",
+		},
+	});
+	if (!r.ok) return null;
+	return r.json();
+}
+
+function secureMode(req) {
+	return String(req.headers["x-forwarded-proto"] || "").split(",")[0].trim() === "https" || req.secure;
+}
+
+function attachCookie(res, req, name, value, maxAgeSeconds) {
+	res.cookie(name, value, {
+		httpOnly: true,
+		secure: secureMode(req),
+		sameSite: "strict",
+		path: "/",
+		maxAge: maxAgeSeconds * 1000,
+	});
+}
+
+function ghMessagePage(kind, title, body) {
+	const accent = kind === "ok" ? "#188038" : kind === "deny" ? "#d93025" : "#1a73e8";
+	return `<!doctype html>
+<html lang="en">
+<head><meta charset="utf-8"/><meta name="viewport" content="width=device-width,initial-scale=1"/><title>${title}</title></head>
+<body style="margin:0;min-height:100vh;background:#fff;display:flex;flex-direction:column;align-items:center;justify-content:center;padding:0 24px;text-align:center;color:#3c4043;font-family:Arial,Helvetica,sans-serif">
+<div style="width:56px;height:6px;border-radius:3px;background:${accent};margin-bottom:24px"></div>
+<h1 style="font-size:22px;font-weight:400;color:#202124;margin:0 0 12px">${title}</h1>
+<p style="font-size:15px;color:#5f6368;margin:0;line-height:1.7">${body}</p>
+<p style="margin-top:30px"><a href="/copehubontop-mavi" style="color:#1a73e8;text-decoration:none;font-size:14px">Back to sign in</a></p>
+</body>
+</html>`;
+}
+
 // --------------------------------------------------------------------------
 // Script payload cache. The served path re-resolves on every read so the admin
 // "Update script" flow (writes scripts/main.luau, regenerates/removes
@@ -77,23 +171,6 @@ function scriptStatus() {
 		obfPresent: fs.existsSync(obf),
 		obfuscateEnabled: config.obfuscatePayload !== false,
 	};
-}
-
-function sha256(text) {
-	return crypto.createHash("sha256").update(text, "utf8").digest("hex");
-}
-
-async function isValidAdmin(pw) {
-	let stored = await kv.getAdminHash();
-	if (!stored && process.env.ADMIN_PASSWORD) {
-		stored = sha256(process.env.ADMIN_PASSWORD);
-		await kv.setAdminHash(stored);
-	}
-	if (!stored) return false;
-	const incoming = sha256(pw || "");
-	const a = Buffer.from(incoming, "hex");
-	const b = Buffer.from(stored, "hex");
-	return a.length === b.length && crypto.timingSafeEqual(a, b);
 }
 
 async function isAdmin(req) {
@@ -157,6 +234,23 @@ app.use((req, res, next) => {
 		"Content-Security-Policy",
 		"default-src 'none'; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' https://*.roblox.com; connect-src 'self'; base-uri 'none'; form-action 'self'; frame-ancestors 'none'"
 	);
+	next();
+});
+
+// Defend against Cross-Site Request Forgery on every state-changing admin
+// endpoint: if a browser sends an Origin header it must match the site's own
+// origin, otherwise the request is dropped (SameSite=Strict is the other
+// layer). Requests without an Origin header (curl, loaders) pass through.
+app.use("/api/admin", (req, res, next) => {
+	if (req.method === "GET" || req.method === "HEAD") return next();
+	const o = req.headers.origin;
+	if (o) {
+		const proto = String(req.headers["x-forwarded-proto"] || "").split(",")[0].trim() || (req.secure ? "https" : "http");
+		const expected = proto + "://" + (req.headers.host || "");
+		if (o !== expected) {
+			return res.status(403).json({ ok: false, error: "Cross-origin requests are forbidden." });
+		}
+	}
 	next();
 });
 
@@ -437,7 +531,7 @@ app.get(
 	})
 );
 
-// ---- Admin auth -----------------------------------------------------------
+// ---- Admin auth (GitHub OAuth only — no passwords) -------------------------
 function clientIp(req) {
 	return (
 		(req.headers["x-forwarded-for"] || "")
@@ -449,45 +543,103 @@ function clientIp(req) {
 	);
 }
 
-app.post(
-	"/api/admin/login",
-	h(async (req, res) => {
-		const ip = clientIp(req);
-		if (!(await kv.loginAttemptAllowed(ip))) {
-			return res.status(429).json({ ok: false, error: "Too many attempts - try again later." });
-		}
-		const { password } = req.body || {};
-		if (typeof password !== "string" || password.length === 0 || password.length > 256) {
-			await kv.loginFailed(ip);
-			return res.status(400).json({ ok: false, error: "Invalid request." });
-		}
-		const remember = req.body && req.body.remember === true;
-		if (!(await isValidAdmin(password))) {
-			await kv.loginFailed(ip);
-			return res.status(401).json({ ok: false, error: "Wrong password" });
-		}
-		await kv.loginSucceeded(ip);
-		const sid = kv.randomId(24);
-		const ttl = remember ? ADMIN_SESSION_SECONDS : 8 * 60 * 60;
-		await kv.sessionCreate(sid, ttl);
-		const isHttps = String(req.headers["x-forwarded-proto"] || "").split(",")[0].trim() === "https";
-		res.cookie("sid", sid, {
-			httpOnly: true,
-			secure: isHttps,
-			sameSite: "lax",
-			path: "/",
-			maxAge: ttl * 1000,
-		});
-		res.json({ ok: true });
-	})
-);
+app.get("/auth/github", h(async (req, res) => {
+	res.setHeader("Cache-Control", "no-store");
+	if (!authConfigured()) {
+		return res
+			.status(200)
+			.set("Content-Type", "text/html")
+			.send(
+				ghMessagePage(
+					"info",
+					"GitHub sign-in isn't configured yet",
+					"Set <b>GITHUB_CLIENT_ID</b>, <b>GITHUB_CLIENT_SECRET</b> and <b>GITHUB_ALLOWED_USERS</b> in the platform environment first. Until then no one — including you — can sign in."
+				)
+			);
+	}
+	const ip = clientIp(req);
+	if (!(await kv.redeemAllowed(ip, 30))) {
+		return res.status(429).set("Content-Type", "text/html").send(ghMessagePage("deny", "Too many attempts", "Slow down and try signing in again in a minute."));
+	}
+	const state = kv.randomId(16);
+	attachCookie(res, req, "gh_state", state, 600);
+	const params = new URLSearchParams({
+		client_id: GH_CLIENT_ID,
+		redirect_uri: ghCallbackUrl(req),
+		state,
+		scope: "",
+	});
+	return res.redirect(GH_AUTHORIZE_BASE + "/login/oauth/authorize?" + params.toString());
+}));
+
+app.get("/auth/github/callback", h(async (req, res) => {
+	res.setHeader("Cache-Control", "no-store");
+	const code = String(req.query.code || "");
+	const state = String(req.query.state || "");
+	const prev = req.cookies && req.cookies.gh_state;
+	const clearState = () =>
+		res.clearCookie("gh_state", { path: "/", httpOnly: true, secure: secureMode(req), sameSite: "strict" });
+
+	if (!authConfigured()) {
+		return res.status(200).set("Content-Type", "text/html").send(
+			ghMessagePage("info", "Authentication isn't configured", "GitHub sign-in isn't set up yet, so this login was refused.")
+		);
+	}
+	if (req.query.error) {
+		clearState();
+		return res.status(400).set("Content-Type", "text/html").send(ghMessagePage("info", "Sign-in cancelled", "You closed the GitHub window or denied access. No problem — nothing changed."));
+	}
+	if (!code || !state || !prev || state !== prev) {
+		clearState();
+		return res.status(400).set("Content-Type", "text/html").send(ghMessagePage("deny", "Sign-in failed", "The login request didn't match what we started. Please try again."));
+	}
+	const ip = clientIp(req);
+	if (!(await kv.redeemAllowed(ip, 30))) {
+		clearState();
+		return res.status(429).set("Content-Type", "text/html").send(ghMessagePage("deny", "Too many attempts", "Please wait a minute and try again."));
+	}
+
+	let token = null;
+	try {
+		token = await ghExchangeCode(code, ghCallbackUrl(req));
+	} catch (err) {
+		console.error("[github] token exchange failed:", err && err.message);
+	}
+	if (!token) {
+		clearState();
+		return res.status(401).set("Content-Type", "text/html").send(ghMessagePage("deny", "GitHub rejected the login", "The authorization code was refused. Please try signing in again."));
+	}
+
+	let user = null;
+	try {
+		user = await ghFetchUser(token);
+	} catch (err) {
+		console.error("[github] user fetch failed:", err && err.message);
+	}
+	clearState();
+	if (!user) {
+		return res.status(502).set("Content-Type", "text/html").send(ghMessagePage("deny", "GitHub is unreachable", "Couldn't fetch your profile right now. Try again in a minute."));
+	}
+	if (!ghAllowedUser(user)) {
+		console.warn("[github] denied sign-in for login=" + (user.login || "?") + " id=" + (user.id || "?"));
+		return res.status(403).set("Content-Type", "text/html").send(
+			ghMessagePage("deny", "Access denied", "This GitHub account (<b>" + escHtml(user.login) + "</b>) is not authorized to use the CopE console. Only the owner's account can sign in.")
+		);
+	}
+
+	const sid = kv.randomId(24);
+	await kv.sessionCreate(sid, ADMIN_SESSION_SECONDS);
+	attachCookie(res, req, "sid", sid, ADMIN_SESSION_SECONDS);
+	return res.redirect("/copehubontop-mavi");
+}));
 
 app.post(
 	"/api/admin/logout",
 	h(async (req, res) => {
 		const sid = req.cookies && req.cookies.sid;
 		if (sid) await kv.sessionDestroy(sid);
-		res.clearCookie("sid", { path: "/", httpOnly: true, secure: true, sameSite: "lax" });
+		res.clearCookie("sid", { path: "/", httpOnly: true, secure: secureMode(req), sameSite: "strict" });
+		res.clearCookie("gh_state", { path: "/", httpOnly: true, secure: secureMode(req), sameSite: "strict" });
 		res.json({ ok: true });
 	})
 );
@@ -797,8 +949,9 @@ app.post("/api/admin/config", requireAdmin, h(async (req, res) => {
 
 // ---- External key-check API -------------------------------------------------
 // Luarmor-style HTTP API for third parties (Sellix webhooks, panels, bots).
-// Authenticated with `Authorization: Bearer <52-char API key>`; when an IP
-// whitelist is configured the caller's IP must be on it too.
+// Authenticated with `Authorization: Bearer <52-char API key>` AND the
+// caller's IP must be on the whitelist. When the whitelist is empty the API is
+// DISABLED entirely (fail-closed): no IP means nothing can pass.
 const API_LIMIT_PER_MIN = 120;
 
 function normIp(ip) {
@@ -808,26 +961,36 @@ function normIp(ip) {
 	return v4 ? v4[1] : ip;
 }
 
+// "ok" -> caller authorized; "disabled" -> whitelist empty (fail closed);
+// anything else -> missing/wrong credentials.
 async function apiAuthed(req) {
 	const auth = String(req.headers.authorization || "");
 	const token = auth.replace(/^Bearer\s+/i, "").trim();
 	const cfg = await kv.getFlag("api_key");
-	if (!cfg || !token) return false;
+	if (!cfg || !token) return "denied";
 	const a = Buffer.from(token, "ascii");
 	const b = Buffer.from(cfg, "ascii");
-	if (a.length !== b.length || !crypto.timingSafeEqual(a, b)) return false;
+	if (a.length !== b.length || !crypto.timingSafeEqual(a, b)) return "denied";
 	const wl = String(((await kv.getFlag("api_whitelist")) || ""))
 		.split(/[\s,;]+/)
 		.map((s) => s.trim())
 		.filter(Boolean);
-	if (wl.length === 0) return true;
-	return wl.includes(normIp(clientIp(req)));
+	if (wl.length === 0) return "disabled";
+	return wl.includes(normIp(clientIp(req))) ? "ok" : "denied";
 }
 
 function apiAuth(req, res, next) {
 	res.setHeader("Cache-Control", "no-store");
 	apiAuthed(req).then(
-		(ok) => (ok ? next() : res.status(401).json({ error: "unauthorized" })),
+		(v) => {
+			if (v === "ok") return next();
+			if (v === "disabled") {
+				return res
+					.status(403)
+					.json({ error: "api_disabled", detail: "The IP whitelist is empty — add at least one IP in the admin console to enable the API." });
+			}
+			return res.status(401).json({ error: "unauthorized" });
+		},
 		() => res.status(500).json({ error: "internal error" })
 	);
 }
@@ -921,27 +1084,15 @@ app.get("/api/admin/telemetry", requireAdmin, h(async (req, res) => {
 	res.json({ ok: true, telemetry: rows, total: await kv.telemetryCount() });
 }));
 
-// ---- Admin first-run password setup ----------------------------------------
-app.get("/api/admin/setup", h(async (_req, res) => {
-	res.json({ needed: !(await kv.getAdminHash()) });
-}));
-
-app.post("/api/admin/setup", h(async (req, res) => {
-	if (await kv.getAdminHash()) return res.status(400).json({ ok: false, error: "already set" });
-	const { password } = req.body || {};
-	if (typeof password !== "string" || password.length < 8 || password.length > 256) {
-		return res.status(400).json({ ok: false, error: "Password must be between 8 and 256 characters" });
-	}
-	if (password.includes("\0") || !/^[\x20-\x7E]+$/.test(password)) {
-		return res.status(400).json({ ok: false, error: "Password must be plain ASCII characters" });
-	}
-	await kv.setAdminHash(sha256(password));
-	res.json({ ok: true });
-}));
-
 // ---- Health ----------------------------------------------------------------
 app.get("/api/status", h(async (_req, res) => {
-	res.json({ ok: true, name: "CopE Loader", adminNeeded: !(await kv.getAdminHash()), persistent: kv.isPersistent() });
+	res.set("Cache-Control", "no-store").json({
+		ok: true,
+		name: "CopE Loader",
+		auth: "github",
+		authConfigured: authConfigured(),
+		persistent: kv.isPersistent(),
+	});
 }));
 
 // ---- Homepage: Google-style 404 ----------------------------------------

@@ -15,12 +15,16 @@ const config = (() => {
 const PORT = Number(process.env.PORT || config.port || 3300);
 
 const server = app.listen(PORT, async () => {
-	const adminNeeded = await (await fetch(`http://127.0.0.1:${PORT}/api/status`))
-		.json()
-		.then((d) => d.adminNeeded)
-		.catch(() => "?");
+	const s = await fetch(`http://127.0.0.1:${PORT}/api/status`)
+		.then((r) => r.json())
+		.catch(() => ({}));
 	console.log("[loader] http://127.0.0.1:" + PORT);
-	console.log("[loader] admin " + (adminNeeded ? "NOT SET - create one at /admin" : "ready (admin password set)"));
+	console.log(
+		"[loader] admin " +
+			(s.authConfigured
+				? "GitHub sign-in ready (restricted to allowlist)"
+				: "GitHub OAuth NOT configured - set GITHUB_CLIENT_ID/GITHUB_CLIENT_SECRET/GITHUB_ALLOWED_USERS")
+	);
 });
 
 process.on("SIGINT", () => {

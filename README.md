@@ -94,22 +94,29 @@ ADMIN_PASSWORD     if set, pre-installs this as the admin password (first boot o
   2. Push this folder to a GitHub repo.
   3. In Vercel: **Add New Project** → import the repo. No build command. The
      install command stays `npm install`.
-  4. Add env vars: `DATABASE_URL` (the Neon string) and
-     `PUBLIC_BASE_URL` = `https://<your-project>.vercel.app`. Optionally
-     `ADMIN_PASSWORD` to pre-set your admin password.
-  5. Deploy. Open the project URL → `/admin` to manage keys; the homepage is the
-     buyer entry.
-  - `vercel.json` bundles `public/`, `scripts/`, `lib/` and `config.json` into
-    the serverless function and routes every path through the Express app.
+4. Add env vars: `DATABASE_URL` (the Neon string),
+      `PUBLIC_BASE_URL` = `https://<your-project>.vercel.app`, plus GitHub OAuth:
+      `GITHUB_CLIENT_ID`, `GITHUB_CLIENT_SECRET` and
+      `GITHUB_ALLOWED_USERS` (your GitHub username — the only account allowed in).
+  5. Create a GitHub OAuth app (GitHub → Settings → Developer settings →
+      OAuth Apps): callback URL = `https://<your-project>.vercel.app/auth/github/callback`.
+  6. Deploy. Open the project URL → `/copehubontop-mavi` → **Sign in with GitHub**.
+     The homepage is a convincing 404; admin access is limited to your account.
+  - `vercel.json` bundles `_private/`, `public/`, `scripts/`, `lib/` and
+    `config.json` into the serverless function and routes every path through
+    the Express app.
   - Update `scripts/main.luau` in the repo and redeploy to ship a new script.
 
 ## API snapshot
 
 - `POST /api/redeem {key}` → `{ ok, blob, seed, size }` (packed payload; used by the loader snippet)
-- Admin (session cookie): `POST /api/admin/setup`, `POST /api/admin/login`,
-  `GET/POST /api/admin/keys`, `GET /api/admin/keys/:id/loader` (build the snippet),
-  `POST /api/admin/keys/:id/revoke`, `DELETE /api/admin/keys/:id`, `GET /api/admin/stats`
-- Root `/` redirects to `/admin` — no public buyer page exists
+- Auth: `GET /auth/github` (starts the flow), `GET /auth/github/callback`
+  (sets the admin session). All `/api/admin/*` need the `sid` cookie.
+  Passwords are gone entirely.
+- Admin: `GET/POST /api/admin/keys`, `GET /api/admin/keys/:id/loader` (build the
+  snippet), `POST /api/admin/keys/:id/revoke`, `DELETE /api/admin/keys/:id`,
+  `GET /api/admin/stats`
+- Root `/` returns a Google-style 404 — no public buyer page exists
 
 ## Files
 

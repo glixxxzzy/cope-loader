@@ -1,7 +1,7 @@
 (function () {
 	const auth = document.getElementById("auth");
-	const setupBox = document.getElementById("setupBox");
-	const loginBox = document.getElementById("loginBox");
+	const signInBox = document.getElementById("signInBox");
+	const unconfiguredBox = document.getElementById("unconfiguredBox");
 	const authMsg = document.getElementById("authMsg");
 	const rows = document.getElementById("rows");
 	const empty = document.getElementById("empty");
@@ -40,9 +40,13 @@
 			.then((s) => {
 				persistent = !!s.persistent;
 				renderPersistence();
-				const online = !s.adminNeeded;
+				const online = !!s.authConfigured;
 				serverDot.classList.toggle("off", !online);
-				serverChip.textContent = online ? "server online" : "password not set";
+				serverChip.textContent = online ? "server online" : "sign-in not configured";
+				if (!online) {
+					signInBox.classList.add("hidden");
+					unconfiguredBox.classList.remove("hidden");
+				}
 				return s;
 			})
 			.catch(() => {
@@ -56,7 +60,7 @@
 			persistWarn.classList.add("hidden");
 		} else {
 			persistWarn.textContent =
-				"Storage is NOT persistent — keys and this password live in memory and will reset on the next cold start or redeploy. Set DATABASE_URL in Vercel before selling keys.";
+				"Storage is NOT persistent — keys, settings and sessions live in memory and will reset on the next cold start or redeploy. Set DATABASE_URL in Vercel before selling keys.";
 			persistWarn.classList.remove("hidden");
 		}
 	}
@@ -76,9 +80,9 @@
 				showShell();
 				return;
 			}
-			const s = await (await fetch("/api/admin/setup")).json();
-			if (s.needed) setupBox.classList.remove("hidden");
-			else loginBox.classList.remove("hidden");
+			const s = await (await fetch("/api/status")).json();
+			if (s.authConfigured) signInBox.classList.remove("hidden");
+			else unconfiguredBox.classList.remove("hidden");
 		} catch {
 			msg("Could not reach the loader server.");
 		}
@@ -99,39 +103,15 @@
 		loadConfig();
 	}
 
-	document.getElementById("doSetup").addEventListener("click", async () => {
-		const password = document.getElementById("pwSetup").value;
-		const res = await fetch("/api/admin/setup", {
-			method: "POST",
-			headers: { "Content-Type": "application/json" },
-			body: JSON.stringify({ password }),
-		});
-		const data = await res.json();
-		if (!res.ok) return msg(data.error || "Failed");
-		showShell();
-	});
-
-	document.getElementById("doLogin").addEventListener("click", async () => {
-		const password = document.getElementById("pwLogin").value;
-		const remember = document.getElementById("rememberLogin").checked;
-		const res = await fetch("/api/admin/login", {
-			method: "POST",
-			headers: { "Content-Type": "application/json" },
-			body: JSON.stringify({ password, remember }),
-		});
-		const data = await res.json();
-		if (!res.ok || !data.ok) return msg(data.error || "Wrong password");
-		showShell();
-	});
-
 	async function guard(fn) {
 		const res = await fn();
 		if (res.status === 401) {
 			document.body.classList.remove("authed");
 			arrayFrom(document.querySelectorAll(".view")).forEach((v) => v.classList.add("hidden"));
 			auth.classList.remove("hidden");
-			loginBox.classList.remove("hidden");
-			msg("Session expired — sign in again.");
+			signInBox.classList.remove("hidden");
+			unconfiguredBox.classList.add("hidden");
+			msg("Session expired — sign in with GitHub again.");
 			return null;
 		}
 		return res;
@@ -830,7 +810,8 @@
 		arrayFrom(document.querySelectorAll(".view")).forEach((v) => v.classList.add("hidden"));
 		document.body.classList.remove("authed");
 		auth.classList.remove("hidden");
-		loginBox.classList.remove("hidden");
+		signInBox.classList.remove("hidden");
+		unconfiguredBox.classList.add("hidden");
 	});
 
 	function esc(s) {
