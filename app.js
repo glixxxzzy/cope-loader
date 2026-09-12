@@ -956,37 +956,40 @@ app.get("/api/status", h(async (_req, res) => {
 	res.json({ ok: true, name: "CopE Loader", adminNeeded: !(await kv.getAdminHash()), persistent: kv.isPersistent() });
 }));
 
-// ---- Homepage: convincing 404 so the site looks like a dead domain ------
-app.get("/", (_req, res) => {
-	res.status(404).set("Content-Type", "text/html").send(`<!doctype html>
+// ---- Homepage: Google-style 404 ----------------------------------------
+// The visible site is a 404; the admin lives on the covert path. This renders
+// the exact Google "not found" error screen (white page, Google wordmark,
+// "404. That's an error.") and echoes the requested path like Google does.
+function escHtml(s) {
+	return String(s).replace(/[&<>"']/g, (c) => (
+		{ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c]
+	));
+}
+
+function google404Html(path) {
+	return `<!doctype html>
 <html lang="en">
 <head>
 <meta charset="utf-8"/>
 <meta name="viewport" content="width=device-width,initial-scale=1"/>
 <title>404 Not Found</title>
-<style>
-*{margin:0;padding:0;box-sizing:border-box}
-body{background:#0f0f0f;color:#999;font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,Helvetica,Arial,sans-serif;min-height:100vh;display:flex;justify-content:center;align-items:center}
-.wrap{text-align:center;padding:40px 20px}
-h1{font-size:72px;font-weight:700;color:#555;margin-bottom:12px}
-p{font-size:18px;color:#666;margin-bottom:24px}
-code{font-size:13px;color:#555;background:#1a1a1a;padding:4px 10px;border-radius:4px;display:inline-block}
-hr{border:none;border-top:1px solid #222;margin:28px auto;max-width:200px}
-span.note{font-size:13px;color:#444}
-</style>
 </head>
-<body>
-<div class="wrap">
-<h1>404</h1>
-<p>The requested URL was not found on this server.</p>
-<hr/>
-<code>Not Found</code>
-<hr/>
-<span class="note">Apache/2.4.62 (Ubuntu) Server at cope-loader.vercel.app Port 80</span>
+<body style="margin:0;min-height:100vh;background:#fff;display:flex;flex-direction:column;align-items:center;justify-content:center;padding:0 24px;text-align:center;color:#777;font-family:Arial,Helvetica,sans-serif">
+<div style="font-size:30px;font-weight:500;letter-spacing:-1px;user-select:none">
+<span style="color:#4285F4">G</span><span style="color:#EA4335">o</span><span style="color:#FBBC05">o</span><span style="color:#4285F4">g</span><span style="color:#34A853">l</span><span style="color:#EA4335">e</span>
 </div>
+<p style="font-size:26px;font-weight:400;color:#777;margin:36px 0 16px">404. That's an error.</p>
+<p style="font-size:18px;color:#777;margin:0;line-height:1.7">The requested URL <b style="font-weight:400">"${path}"</b> was not found on this server.</p>
+<p style="font-size:18px;color:#777;margin:10px 0 0">That's all we know.</p>
 </body>
-</html>`);
-});
+</html>`;
+}
+
+function sendGoogle404(req, res) {
+	res.status(404).set("Content-Type", "text/html").send(google404Html(escHtml(req.originalUrl || "/")));
+}
+
+app.get("/", (req, res) => sendGoogle404(req, res));
 
 app.get("/copehubontop-mavi", (_req, res) => res.sendFile(path.join(__dirname, "public", "admin.html")));
 
@@ -999,7 +1002,10 @@ app.get("/robots.txt", (_req, res) => {
 	res.set("Content-Type", "text/plain").send("User-agent: *\nDisallow: /\n");
 });
 
-// 404
-app.use((_req, res) => res.status(404).json({ error: "not found" }));
+// 404: APIs stay JSON (executors/scripts parse them), anything else is a page
+app.use((req, res) => {
+	if (req.path.startsWith("/api/")) return res.status(404).json({ error: "not found" });
+	sendGoogle404(req, res);
+});
 
 module.exports = app;
