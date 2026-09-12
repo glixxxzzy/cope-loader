@@ -6,6 +6,7 @@ const crypto = require("crypto");
 
 const protect = require("./lib/protect");
 const kv = require("./lib/kv");
+const clyde = require("./lib/clyde");
 const { buildLoader, buildHttpGate, buildLoadstring, buildPartsBootstrap } = require("./lib/loader");
 const obfuscate = require("./lib/obfuscate");
 
@@ -27,7 +28,6 @@ function resolveScriptPath() {
 	if (config.obfuscatePayload !== false && fs.existsSync(obf)) return obf;
 	return path.join(base, "main.luau");
 }
-const SCRIPT_PATH = resolveScriptPath();
 
 const PART_COUNT = Math.min(Math.max(Number(process.env.PART_COUNT || config.parts || 4), 2), 8);
 const PART_TTL_SECONDS = Number(process.env.PART_TTL_SECONDS || config.partTtlSeconds || 120);
@@ -38,19 +38,45 @@ const REDEEM_LIMIT_PER_MIN = Number(
 const ADMIN_SESSION_SECONDS = Number(process.env.ADMIN_SESSION_SECONDS || 30 * 24 * 60 * 60);
 
 // --------------------------------------------------------------------------
-// Script payload cache (re-reads on mtime change when the file changes on disk)
+// Script payload cache. The served path re-resolves on every read so the admin
+// "Update script" flow (writes scripts/main.luau, regenerates/removes
+// main.obf.luau) is picked up immediately, without a server restart. The body
+// is only re-read when the resolved path or its mtime changes.
 // --------------------------------------------------------------------------
-let scriptCache = { bytes: Buffer.alloc(0), mtime: 0 };
+let scriptCache = { path: null, bytes: Buffer.alloc(0), mtime: 0 };
 function getScriptBytes() {
 	try {
-		const st = fs.statSync(SCRIPT_PATH);
-		if (st.mtimeMs !== scriptCache.mtime) {
-			scriptCache = { bytes: fs.readFileSync(SCRIPT_PATH), mtime: st.mtimeMs };
+		const p = resolveScriptPath();
+		const st = fs.statSync(p);
+		if (p !== scriptCache.path || st.mtimeMs !== scriptCache.mtime) {
+			scriptCache = { path: p, bytes: fs.readFileSync(p), mtime: st.mtimeMs };
 		}
 	} catch {
-		scriptCache = { bytes: Buffer.alloc(0), mtime: 0 };
+		scriptCache = { path: null, bytes: Buffer.alloc(0), mtime: 0 };
 	}
 	return scriptCache.bytes;
+}
+
+function scriptStatus() {
+	const p = resolveScriptPath();
+	const obf = path.join(__dirname, "scripts", "main.obf.luau");
+	const main = path.join(__dirname, "scripts", "main.luau");
+	let size = 0;
+	let mtime = null;
+	try {
+		const st = fs.statSync(p);
+		size = st.size;
+		mtime = asIso(st.mtimeMs);
+	} catch {}
+	return {
+		servedPath: p,
+		servedIsObfuscated: p === obf,
+		size,
+		mtime,
+		mainPresent: fs.existsSync(main),
+		obfPresent: fs.existsSync(obf),
+		obfuscateEnabled: config.obfuscatePayload !== false,
+	};
 }
 
 function sha256(text) {
@@ -486,6 +512,31 @@ app.delete("/api/admin/keys/:id", requireAdmin, h(async (req, res) => {
 	res.json({ ok: true });
 }));
 
+// Add time to a key: extends the existing expiry (starts from now if the key
+// has no expiry or already expired). Body: { amount: <int>, unit: "h"|"d"|"w" }.
+app.post("/api/admin/keys/:id/extend", requireAdmin, h(async (req, res) => {
+	const row = await kv.findByKey(req.params.id);
+	if (!row) return res.status(404).json({ ok: false, error: "not found" });
+
+	// mirror the generate-form expiry parsing (1h/1d/1w style, but any positive int)
+	let { amount, unit } = req.body || {};
+	amount = parseInt(amount, 10);
+	unit = String(unit || "d");
+	if (!Number.isFinite(amount) || amount < 1 || amount > 36500) {
+		return res.status(400).json({ ok: false, error: "amount must be between 1 and 36500" });
+	}
+	const mult = unit === "h" ? 3600e3 : unit === "d" ? 86400e3 : unit === "w" ? 6048e5 : null;
+	if (!mult) {
+		return res.status(400).json({ ok: false, error: "unit must be h, d or w" });
+	}
+	const base = row.expires && Date.parse(row.expires) > Date.now()
+		? Date.parse(row.expires)
+		: Date.now();
+	const expires = asIso(base + amount * mult);
+	await kv.setExpires(req.params.id, expires);
+	res.json({ ok: true, key: row.key, expires });
+}));
+
 // Resolve the public base URL once, the same way for every loader build.
 function getBaseUrl(req) {
 	return (
@@ -566,6 +617,82 @@ app.post("/api/admin/convert", requireAdmin, h(async (req, res) => {
 		size: src.length,
 		blobChars: csv.length,
 	});
+}));
+
+// ---- Script management: paste an updated script in the admin, save it, and
+// (when Clyde is available) obfuscate it so the next loader load ships the new
+// version. Both files are written atomically (temp + rename) so a crash can
+// never leave a half-written payload. The payload cache re-resolves the served
+// file on every read, so this takes effect for the very next redemption.
+const MAX_SCRIPT_BYTES = Number(process.env.MAX_SCRIPT_KB || 600) * 1024;
+
+function atomicWrite(target, content) {
+	const tmp = target + ".tmp-" + process.pid + "-" + Date.now();
+	fs.writeFileSync(tmp, content, "utf8");
+	fs.renameSync(tmp, target);
+}
+
+app.get("/api/admin/script", requireAdmin, h(async (_req, res) => {
+	res.json({ ok: true, status: scriptStatus() });
+}));
+
+app.post("/api/admin/script", requireAdmin, h(async (req, res) => {
+	const script = req.body && typeof req.body.script === "string" ? req.body.script : "";
+	if (!script.trim()) {
+		return res.status(400).json({ ok: false, error: "Paste a script first." });
+	}
+	if (Buffer.byteLength(script, "utf8") > MAX_SCRIPT_BYTES) {
+		return res.status(400).json({
+			ok: false,
+			error: "Script too large (max " + Math.round(MAX_SCRIPT_BYTES / 1024) + " KB).",
+		});
+	}
+	if (script.includes("\0")) {
+		return res.status(400).json({ ok: false, error: "Script contains null bytes." });
+	}
+
+	const mainPath = path.join(__dirname, "scripts", "main.luau");
+	const obfPath = path.join(__dirname, "scripts", "main.obf.luau");
+	atomicWrite(mainPath, script);
+
+	let obfuscated = false;
+	let clydeError = null;
+	if (config.obfuscatePayload !== false) {
+		const r = clyde.obfuscate(script);
+		if (r.ok) {
+			atomicWrite(obfPath, r.out);
+			obfuscated = true;
+		} else {
+			clydeError = r.error || "Clyde unavailable";
+			// Fall back to the plaintext copy so the served payload is the NEW
+			// script, not a stale obfuscated one.
+			try {
+				fs.unlinkSync(obfPath);
+			} catch {}
+		}
+	}
+
+	res.json({ ok: true, obfuscated, clydeError, status: scriptStatus() });
+}));
+
+// The readable source the admin edits (the obfuscated copy is unreadable by
+// design - only main.luau, what was last saved, is recoverable).
+app.get("/api/admin/script/source", requireAdmin, h(async (_req, res) => {
+	const p = path.join(__dirname, "scripts", "main.luau");
+	if (!fs.existsSync(p)) {
+		return res
+			.status(404)
+			.json({ ok: false, error: "No editable script saved yet - paste one below and Update." });
+	}
+	try {
+		const src = fs.readFileSync(p, "utf8");
+		if (Buffer.byteLength(src, "utf8") > 2 * 1024 * 1024) {
+			return res.status(400).json({ ok: false, error: "Source too large to load into the editor." });
+		}
+		res.json({ ok: true, script: src, bytes: Buffer.byteLength(src, "utf8") });
+	} catch {
+		res.status(500).json({ ok: false, error: "Could not read scripts/main.luau." });
+	}
 }));
 
 app.get("/api/admin/stats", requireAdmin, h(async (_req, res) => {

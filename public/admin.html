@@ -8,10 +8,15 @@
 </head>
 <body>
 	<header>
-		<div class="brand">CopE<span>Loader</span> <span style="color:var(--muted);font-weight:400;font-size:13px">admin</span></div>
+		<div class="brand">
+			<span class="mark"><svg viewBox="0 0 24 24" fill="none"><path d="M13 2 3 14h7l-1 8 10-12h-7l1-8Z" fill="currentColor"/></svg></span>
+			<b>CopE</b><span class="alt">Loader</span>
+		</div>
+		<div class="chip"><span class="dot" id="serverDot"></span><span id="serverChip">connecting…</span></div>
 	</header>
+
 	<main>
-		<section id="auth">
+		<section id="auth" class="authwrap" style="margin:0 auto">
 			<h1>Admin access</h1>
 			<div class="card">
 				<div id="setupBox" class="hidden">
@@ -26,7 +31,7 @@
 						<input type="password" id="pwLogin" placeholder="Admin password" />
 						<button id="doLogin">Sign in</button>
 					</div>
-					<label style="display:flex;align-items:center;gap:8px;margin-top:12px;font-size:13px;color:var(--muted);cursor:pointer">
+					<label style="display:flex;align-items:center;gap:8px;margin-top:14px;font-size:13px;color:var(--muted);cursor:pointer">
 						<input type="checkbox" id="rememberLogin" checked style="cursor:pointer" />
 						Keep me signed in (30 days)
 					</label>
@@ -37,81 +42,133 @@
 
 		<section id="dash" class="hidden">
 			<div id="persistWarn" class="msg err hidden"></div>
-			<div class="toolbar">
-				<input type="text" id="note" placeholder="Note / buyer name (optional)" class="grow" />
-				<select id="expiry">
-					<option value="">Never expires</option>
-					<option value="1h">1 hour</option>
-					<option value="1d">1 day</option>
-					<option value="7d">7 days</option>
-				</select>
-				<input type="number" id="count" value="1" min="1" max="100" style="max-width:90px" title="How many keys" />
-				<button id="generate">Generate keys</button>
-				<button class="secondary" id="genericLoader" title="Copy a loader that asks the buyer for their key inside the executor">Copy key-page loader</button>
-				<button class="secondary" id="oneLiner" title="Copy a one-liner: loadstring(game:HttpGet(".../api/script"))()">Copy one-liner</button>
-			</div>
-			<div id="genOut"></div>
 
-			<h2>Issued keys <span style="font-weight:400;color:var(--muted);font-size:12px" id="statline"></span>
-				<button class="secondary small" id="refresh" style="float:right">Refresh</button>
+			<div class="statgrid" id="statTiles"></div>
+
+			<h2><span class="bar"></span>Key factory</h2>
+			<div class="card">
+				<div class="toolbar">
+					<input type="text" id="note" placeholder="Note / buyer name (optional)" class="grow" />
+					<select id="expiry">
+						<option value="">Never expires</option>
+						<option value="1h">1 hour</option>
+						<option value="1d">1 day</option>
+						<option value="7d">7 days</option>
+						<option value="30d">30 days</option>
+					</select>
+					<input type="number" id="count" value="1" min="1" max="100" style="max-width:90px" title="How many keys" />
+					<button id="generate">Generate keys</button>
+				</div>
+				<div class="toolbar">
+					<button class="secondary" id="genericLoader" title="Copy a loader that asks the buyer for their key inside the executor">Copy key-page loader</button>
+					<button class="secondary" id="oneLiner" title="Copy a one-liner: loadstring(game:HttpGet(".../api/script"))()">Copy one-liner</button>
+				</div>
+				<div id="genOut"></div>
+			</div>
+
+			<h2><span class="bar"></span>Issued keys
+				<span style="font-weight:400;color:var(--muted);font-size:12px" id="statline"></span>
+				<button class="secondary small" id="refresh" style="margin-left:auto">Refresh</button>
 			</h2>
-			<div class="card" style="padding:6px">
+			<div class="card hoverable" style="padding:8px">
 				<table>
 					<thead>
-						<tr><th>Key</th><th>Note</th><th>Expires</th><th>Status</th><th>Uses</th><th>Last use</th><th></th></tr>
+						<tr><th>Key</th><th>Note</th><th>Expires</th><th>Status</th><th>Uses</th><th>Last use</th><th style="text-align:right">Actions</th></tr>
 					</thead>
 					<tbody id="rows"></tbody>
 				</table>
 				<p class="meta" id="empty" style="padding:10px">No keys yet.</p>
 			</div>
+			<p class="meta">To give a buyer access: <b>Loader</b> copies a one-click snippet for their key, <b>One-line</b> a single <code>loadstring</code> with the key baked into the URL, or copy the <b>key-page loader</b> / <b>one-liner</b> once and hand it to everyone. <b>+Time</b> extends a key's expiry. Revoking a key kills any snippet that carries it.</p>
 
-			<p class="meta">To give a buyer access: click <b>Loader</b> on their key to send a one-click snippet, <b>One-line</b> to
-				send a single <code>loadstring</code> line with their key baked into the URL, or copy the <b>key-page loader</b> or
-				<b>one-liner</b> once and hand it to everyone — the key page opens in the executor and validates on the server when
-				the key is submitted. Revoking a key kills any snippet that carries it.</p>
-
-			<h2>Execution log <span style="font-weight:400;color:var(--muted);font-size:12px" id="teleStat"></span>
-				<button class="secondary small" id="refreshTele" style="float:right">Refresh</button>
+			<h2><span class="bar"></span>Execution analytics
+				<span style="font-weight:400;color:var(--muted);font-size:12px" id="teleStat"></span>
+				<button class="secondary small" id="refreshTele" style="margin-left:auto">Refresh</button>
 			</h2>
-			<div class="card" style="padding:6px">
-				<table>
-					<thead>
-						<tr><th>User</th><th>UserId</th><th>Executor</th><th>Key</th><th>Time</th></tr>
-					</thead>
-					<tbody id="teleRows"></tbody>
-				</table>
+			<div class="card hoverable" style="padding:8px">
+				<div id="execBars" class="barlist"></div>
+				<div style="overflow-x:auto">
+					<table>
+						<thead>
+							<tr><th>User</th><th>UserId</th><th>Executor</th><th>Key</th><th>Time</th></tr>
+						</thead>
+						<tbody id="teleRows"></tbody>
+					</table>
+				</div>
 				<p class="meta" id="teleEmpty" style="padding:10px">No executions logged yet.</p>
 			</div>
 
-			<h2>Offline build <span style="font-weight:400;color:var(--muted);font-size:12px">(no server, no key)</span></h2>
-			<p class="meta">Turns a Luau script into a single self-contained <code>loadstring</code> build — no server, no key. Useful for testing the payload without the loader site.</p>
-			<textarea id="convSrc" rows="6" placeholder="Paste your Luau script here…"></textarea>
-			<div class="row" style="margin-top:10px">
-				<button id="convDo">Convert pasted script</button>
-				<button class="secondary" id="convFile">Convert scripts/main.luau</button>
+			<h2><span class="bar"></span>Script
+				<span style="font-weight:400;color:var(--muted);font-size:12px" id="scriptStatus"></span>
+			</h2>
+			<div class="card hoverable">
+				<p class="meta" id="scriptMeta"></p>
+				<textarea id="scriptSrc" rows="10" placeholder="Paste your updated Luau script here…"></textarea>
+				<div class="row" style="margin-top:12px">
+					<button id="scriptUpdate"><span class="cta">Update &amp; obfuscate</span></button>
+					<button class="secondary" id="scriptLoadCurrent" title="Load the currently served script into the editor">Edit current script</button>
+				</div>
+				<p class="meta">Saving makes the new script the one every loader loads on its next run. If Clyde is available on this server the payload is obfuscated before it ships; otherwise it falls back to plaintext for this update.</p>
+				<div id="scriptOut"></div>
 			</div>
-			<div id="convOut"></div>
 
-			<h2>Hygiene</h2>
+			<h2><span class="bar"></span>Offline build <span style="font-weight:400;color:var(--muted);font-size:12px">(no server, no key)</span></h2>
+			<div class="card hoverable">
+				<p class="meta">Turns a Luau script into a single self-contained <code>loadstring</code> build — no server, no key. Useful for testing the payload without the loader site.</p>
+				<textarea id="convSrc" rows="6" placeholder="Paste your Luau script here…"></textarea>
+				<div class="row" style="margin-top:10px">
+					<button id="convDo">Convert pasted script</button>
+					<button class="secondary" id="convFile">Convert scripts/main.luau</button>
+				</div>
+				<div id="convOut"></div>
+			</div>
+
+			<h2><span class="bar"></span>Hygiene</h2>
 			<div class="row" style="margin-top:4px">
 				<button class="secondary" id="logout">Sign out</button>
 			</div>
 		</section>
 	</main>
 
+	<footer>CopE Loader — key-gated delivery · admin console</footer>
+
 	<div id="snippetModal" class="modal hidden">
 		<div class="card">
 			<div class="toolbar">
 				<b id="snippetTitle">Snippet</b>
-				<div style="margin-left:auto">
-					<button class="secondary small" id="snippetCopy">Copy</button>
-					<button class="secondary small" id="snippetClose">Close</button>
-				</div>
+				<button class="secondary small closex" id="snippetClose" title="Close">&times;</button>
 			</div>
 			<p class="meta" style="margin:8px 0" id="snippetDesc"></p>
 			<pre class="code" id="snippetText" style="max-height:340px;overflow:auto;user-select:all"></pre>
+			<div class="row" style="margin-top:12px">
+				<button id="snippetCopy">Copy</button>
+			</div>
 		</div>
 	</div>
+
+	<div id="timeModal" class="modal hidden">
+		<div class="card" style="max-width:420px">
+			<div class="toolbar">
+				<b id="timeTitle">Add time to key</b>
+				<button class="secondary small closex" id="timeClose" title="Close">&times;</button>
+			</div>
+			<p class="meta" id="timeKey" style="margin:8px 0 14px"></p>
+			<div id="timeChips" class="seg"></div>
+			<div class="row" style="margin-top:14px">
+				<input type="number" id="timeCustom" min="1" max="36500" placeholder="Custom amount" style="flex:1" />
+				<select id="timeUnit" style="max-width:90px">
+					<option value="h">hours</option>
+					<option value="d" selected>days</option>
+					<option value="w">weeks</option>
+				</select>
+			</div>
+			<div class="row" style="margin-top:14px">
+				<button id="timeConfirm">Apply</button>
+			</div>
+			<div id="timeOut" class="msg hidden"></div>
+		</div>
+	</div>
+
 	<script src="/admin.js"></script>
 </body>
 </html>
