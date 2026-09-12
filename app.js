@@ -980,14 +980,12 @@ function sendGoogle404(req, res) {
 app.get("/", (req, res) => sendGoogle404(req, res));
 
 app.get("/copehubontop-mavi", (_req, res) =>
-	res.setHeader("Cache-Control", "no-store").sendFile(path.join(__dirname, "public", "admin.html"))
+	res.setHeader("Cache-Control", "no-store").sendFile(path.join(__dirname, "_private", "admin.html"))
 );
 
-// The admin page is served only on its covert path; its literal filename stays
-// a 404 so directory scanners can't discover it via express.static below.
-app.use("/admin.html", (req, res) => sendGoogle404(req, res));
-
 // ---- Static ----------------------------------------------------------------
+// admin.html lives in _private/ (not public/) so Vercel's edge file serving and
+// express.static can never expose it under its literal name.
 app.use(express.static(path.join(__dirname, "public")));
 
 // Keep scrapers/bots away from the admin path; the root is already a 404 so
