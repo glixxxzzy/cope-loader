@@ -118,6 +118,14 @@ function asIso(ts) {
 	return ts ? new Date(ts).toISOString() : null;
 }
 
+function dayKey(d = new Date()) {
+	return d.toISOString().slice(0, 10);
+}
+
+async function recordStat(kind) {
+	await kv.statsHit(dayKey(), kind);
+}
+
 // Wrap async handlers so rejections become 500s instead of hanging the request.
 function h(fn) {
 	return (req, res) => {
@@ -163,23 +171,32 @@ app.post(
 		}
 		const { key } = req.body || {};
 		if (!key || typeof key !== "string" || key.length > 64) {
+			await recordStat("reject");
 			return res.status(400).json({ ok: false, error: "Invalid request." });
 		}
 		const k = key.trim();
+		if ((await kv.getFlag("kill_switch")) === "1") {
+			await recordStat("reject");
+			return res.status(403).json({ ok: false, error: "This script has been disabled by its owner." });
+		}
 		const row = await kv.findByKey(k);
 		if (!row || row.revoked) {
+			await recordStat("reject");
 			return res.status(404).json({ ok: false, error: "Invalid or revoked key." });
 		}
 		if (row.expires) {
 			const expMs = new Date(row.expires).getTime();
 			if (Number.isFinite(expMs) && Date.now() > expMs) {
+				await recordStat("reject");
 				return res.status(403).json({ ok: false, error: "This key has expired." });
 			}
 		}
 		await kv.bumpUse(k);
+		await recordStat("redeem");
 
 		const bytes = getScriptBytes();
 		if (bytes.length === 0) {
+			await recordStat("reject");
 			return res
 				.status(500)
 				.json({ ok: false, error: "No protected script uploaded yet (scripts/main.luau missing)." });
@@ -282,6 +299,7 @@ app.get(
 
 		const ip = req.headers["x-forwarded-for"] || req.ip || req.socket.remoteAddress || "0";
 		if (!(await kv.redeemAllowed(ip, REDEEM_LIMIT_PER_MIN))) {
+			await recordStat("reject");
 			return res
 				.status(429)
 				.type("text/plain")
@@ -298,15 +316,25 @@ app.get(
 		}
 
 		if (key.length > 64) {
+			await recordStat("reject");
 			return res.status(400).type("text/plain").send(scriptStatusChunk("invalid request"));
+		}
+		if ((await kv.getFlag("kill_switch")) === "1") {
+			await recordStat("reject");
+			return res
+				.status(403)
+				.type("text/plain")
+				.send(scriptStatusChunk("this script has been disabled by its owner"));
 		}
 		const row = await kv.findByKey(key);
 		if (!row || row.revoked) {
+			await recordStat("reject");
 			return res.status(403).type("text/plain").send(scriptStatusChunk("invalid or revoked key"));
 		}
 		if (row.expires) {
 			const expMs = new Date(row.expires).getTime();
 			if (Number.isFinite(expMs) && Date.now() > expMs) {
+				await recordStat("reject");
 				return res
 					.status(403)
 					.type("text/plain")
@@ -314,9 +342,11 @@ app.get(
 			}
 		}
 		await kv.bumpUse(key);
+		await recordStat("redeem");
 
 		const bytes = getScriptBytes();
 		if (bytes.length === 0) {
+			await recordStat("reject");
 			return res
 				.status(500)
 				.type("text/plain")
@@ -475,7 +505,7 @@ app.get("/api/admin/keys", requireAdmin, h(async (_req, res) => {
 }));
 
 app.post("/api/admin/keys", requireAdmin, h(async (req, res) => {
-	let { count, note, expiresIn } = req.body || {};
+	let { count, note, expiresIn, type } = req.body || {};
 	count = Math.min(Math.max(parseInt(count, 10) || 1, 1), 100);
 	note = String(note || "").replace(/[\x00-\x1F\x7F]/g, "").slice(0, 120);
 	let expires = null;
@@ -486,6 +516,11 @@ app.post("/api/admin/keys", requireAdmin, h(async (req, res) => {
 			expires = asIso(Date.now() + parseInt(match[1], 10) * mult);
 		}
 	}
+	type = String(type || "").toLowerCase();
+	if (!["temporary", "daylocked", "lifetime"].includes(type)) {
+		type = expires ? "daylocked" : "temporary";
+	}
+	if (type === "lifetime") expires = null;
 	const created = asIso(Date.now());
 	const createdKeys = [];
 	for (let i = 0; i < count; i++) {
@@ -493,8 +528,8 @@ app.post("/api/admin/keys", requireAdmin, h(async (req, res) => {
 		do {
 			k = protect.generateKey();
 		} while (await kv.findByKey(k));
-		await kv.insertKey(k, note, created, expires);
-		createdKeys.push({ key: k, note, expires });
+		await kv.insertKey(k, note, created, expires, type);
+		createdKeys.push({ key: k, note, expires, type });
 	}
 	res.json({ ok: true, keys: createdKeys });
 }));
@@ -697,12 +732,166 @@ app.get("/api/admin/script/source", requireAdmin, h(async (_req, res) => {
 
 app.get("/api/admin/stats", requireAdmin, h(async (_req, res) => {
 	const list = await kv.listKeys();
+	const dayStats = await kv.statsAll();
+	const today = dayKey();
+	const todayRow = dayStats.find((d) => d.day === today) || { redeems: 0, rejects: 0 };
+	const totalR = dayStats.reduce((s, d) => s + Number(d.redeems || 0), 0);
+	const totalJ = dayStats.reduce((s, d) => s + Number(d.rejects || 0), 0);
 	res.json({
 		total: list.length,
 		active: list.filter((r) => !r.revoked).length,
 		uses: list.reduce((s, r) => s + (Number(r.uses) || 0), 0),
 		payloadBytes: getScriptBytes().length,
+		killSwitch: (await kv.getFlag("kill_switch")) === "1",
+		dayStats,
+		todayRedeems: todayRow.redeems,
+		todayRejects: todayRow.rejects,
+		rejectRate:
+			totalR + totalJ > 0 ? Math.round((totalJ / (totalR + totalJ)) * 1000) / 10 : 0,
+		rejectRateToday:
+			todayRow.redeems + todayRow.rejects > 0
+				? Math.round((todayRow.rejects / (todayRow.redeems + todayRow.rejects)) * 1000) / 10
+				: 0,
 	});
+}));
+
+// ---- Kill switch ------------------------------------------------------------
+// One-click "stop everything": while on, /api/redeem and keyed /api/script
+// requests are refused until the toggle is flipped back. All existing keys stay
+// valid - execution is merely paused, not revoked.
+app.post("/api/admin/killswitch", requireAdmin, h(async (req, res) => {
+	const enabled = !!(req.body && req.body.enabled);
+	await kv.setFlag("kill_switch", enabled ? "1" : "0");
+	res.json({ ok: true, enabled });
+}));
+
+// ---- Admin config (API key, IP whitelist, Discord settings) ------------------
+app.get("/api/admin/config", requireAdmin, h(async (_req, res) => {
+	res.json({
+		ok: true,
+		killSwitch: (await kv.getFlag("kill_switch")) === "1",
+		apiKey: (await kv.getFlag("api_key")) || null,
+		ipWhitelist: (await kv.getFlag("api_whitelist")) || "",
+		discord: {
+			enabled: (await kv.getFlag("discord_enabled")) === "1",
+			botToken: (await kv.getFlag("discord_token")) || "",
+			guildId: (await kv.getFlag("discord_guild")) || "",
+			channelId: (await kv.getFlag("discord_channel")) || "",
+		},
+	});
+}));
+
+app.post("/api/admin/config", requireAdmin, h(async (req, res) => {
+	const b = req.body || {};
+	if (b.action === "api-key") {
+		const apiKey = crypto.randomBytes(26).toString("hex");
+		await kv.setFlag("api_key", apiKey);
+		return res.json({ ok: true, apiKey });
+	}
+	if (typeof b.ipWhitelist === "string") {
+		const cleaned = b.ipWhitelist
+			.split(/[\s,;]+/)
+			.map((s) => s.trim())
+			.filter((s) => /^[\w.:%*-]+$/.test(s))
+			.join("\n");
+		await kv.setFlag("api_whitelist", cleaned);
+		return res.json({ ok: true, ipWhitelist: cleaned });
+	}
+	if (b.discord && typeof b.discord === "object") {
+		const d = b.discord;
+		await kv.setFlag("discord_enabled", d.enabled ? "1" : "0");
+		if (typeof d.botToken === "string") await kv.setFlag("discord_token", d.botToken.trim().slice(0, 200));
+		if (typeof d.guildId === "string") await kv.setFlag("discord_guild", d.guildId.trim().slice(0, 64));
+		if (typeof d.channelId === "string") await kv.setFlag("discord_channel", d.channelId.trim().slice(0, 64));
+		return res.json({ ok: true });
+	}
+	return res.status(400).json({ ok: false, error: "Unknown configuration action." });
+}));
+
+// ---- External key-check API -------------------------------------------------
+// Luarmor-style HTTP API for third parties (Sellix webhooks, panels, bots).
+// Authenticated with `Authorization: Bearer <52-char API key>`; when an IP
+// whitelist is configured the caller's IP must be on it too.
+const API_LIMIT_PER_MIN = 120;
+
+function normIp(ip) {
+	ip = String(ip || "");
+	if (ip === "::1" || ip === "::ffff:127.0.0.1") return "127.0.0.1";
+	const v4 = /^::ffff:(\d+\.\d+\.\d+\.\d+)$/.exec(ip);
+	return v4 ? v4[1] : ip;
+}
+
+async function apiAuthed(req) {
+	const auth = String(req.headers.authorization || "");
+	const token = auth.replace(/^Bearer\s+/i, "").trim();
+	const cfg = await kv.getFlag("api_key");
+	if (!cfg || !token) return false;
+	const a = Buffer.from(token, "ascii");
+	const b = Buffer.from(cfg, "ascii");
+	if (a.length !== b.length || !crypto.timingSafeEqual(a, b)) return false;
+	const wl = String(((await kv.getFlag("api_whitelist")) || ""))
+		.split(/[\s,;]+/)
+		.map((s) => s.trim())
+		.filter(Boolean);
+	if (wl.length === 0) return true;
+	return wl.includes(normIp(clientIp(req)));
+}
+
+function apiAuth(req, res, next) {
+	apiAuthed(req).then(
+		(ok) => (ok ? next() : res.status(401).json({ error: "unauthorized" })),
+		() => res.status(500).json({ error: "internal error" })
+	);
+}
+
+async function apiRate(req, res, next) {
+	if (await kv.redeemAllowed(clientIp(req), API_LIMIT_PER_MIN)) return next();
+	res.status(429).json({ error: "rate limited" });
+}
+
+// Check a key: what a Sellix webhook or a buyer-facing panel asks.
+app.get("/api/v1/key/:key", apiAuth, apiRate, h(async (req, res) => {
+	const k = String(req.params.key || "").slice(0, 64).trim();
+	const row = await kv.findByKey(k);
+	if (!row) return res.status(404).json({ error: "not found", key: k });
+	const expired = row.expires ? new Date(row.expires).getTime() < Date.now() : false;
+	res.json({
+		key: row.key,
+		valid: !row.revoked && !expired,
+		revoked: !!row.revoked,
+		expired,
+		expires: row.expires,
+		type: row.type || "temporary",
+		uses: row.uses,
+		last_use: row.last_use,
+	});
+}));
+
+app.post("/api/v1/key/:key/revoke", apiAuth, apiRate, h(async (req, res) => {
+	const k = String(req.params.key || "").slice(0, 64).trim();
+	const row = await kv.findByKey(k);
+	if (!row) return res.status(404).json({ error: "not found" });
+	const target = !(req.body && req.body.revoked === false);
+	await kv.setRevoked(k, target);
+	res.json({ ok: true, key: k, revoked: target });
+}));
+
+app.post("/api/v1/key/:key/extend", apiAuth, apiRate, h(async (req, res) => {
+	const k = String(req.params.key || "").slice(0, 64).trim();
+	const row = await kv.findByKey(k);
+	if (!row) return res.status(404).json({ error: "not found" });
+	let { amount, unit } = req.body || {};
+	amount = parseInt(amount, 10);
+	unit = String(unit || "d");
+	if (!Number.isFinite(amount) || amount < 1 || amount > 36500) {
+		return res.status(400).json({ error: "amount invalid" });
+	}
+	const mult = unit === "h" ? 3600e3 : unit === "d" ? 86400e3 : unit === "w" ? 6048e5 : 0;
+	if (!mult) return res.status(400).json({ error: "unit must be h, d or w" });
+	const base = row.expires && Date.parse(row.expires) > Date.now() ? Date.parse(row.expires) : Date.now();
+	const expires = asIso(base + amount * mult);
+	await kv.setExpires(k, expires);
+	res.json({ ok: true, key: k, expires });
 }));
 
 // ---- Telemetry ---------------------------------------------------------------

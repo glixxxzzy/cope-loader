@@ -7,130 +7,275 @@
 	<link rel="stylesheet" href="/app.css" />
 </head>
 <body>
-	<header>
+	<!-- Luarmor-style: fixed side panel navigation, one page per module -->
+	<aside id="sidebar">
 		<div class="brand">
 			<span class="mark"><svg viewBox="0 0 24 24" fill="none"><path d="M13 2 3 14h7l-1 8 10-12h-7l1-8Z" fill="currentColor"/></svg></span>
 			<b>CopE</b><span class="alt">Loader</span>
 		</div>
-		<div class="chip"><span class="dot" id="serverDot"></span><span id="serverChip">connecting…</span></div>
-	</header>
 
-	<main>
-		<section id="auth" class="authwrap" style="margin:0 auto">
-			<h1>Admin access</h1>
-			<div class="card">
-				<div id="setupBox" class="hidden">
-					<p class="lead" style="margin-bottom:14px">First run — set a password (min 8 chars) to protect the admin console.</p>
-					<div class="row">
-						<input type="password" id="pwSetup" placeholder="New admin password" />
-						<button id="doSetup">Create</button>
-					</div>
-				</div>
-				<div id="loginBox" class="hidden">
-					<div class="row">
-						<input type="password" id="pwLogin" placeholder="Admin password" />
-						<button id="doLogin">Sign in</button>
-					</div>
-					<label style="display:flex;align-items:center;gap:8px;margin-top:14px;font-size:13px;color:var(--muted);cursor:pointer">
-						<input type="checkbox" id="rememberLogin" checked style="cursor:pointer" />
-						Keep me signed in (30 days)
-					</label>
-				</div>
-				<div id="authMsg" class="msg hidden"></div>
+		<nav class="side">
+			<button class="navbtn active" data-view="dashboard">
+				<svg viewBox="0 0 24 24"><path d="M3 13h8V3H3v10Zm0 8h8v-6H3v6Zm10 0h8V11h-8v10Zm0-18v6h8V3h-8Z" fill="currentColor"/></svg>
+				Dashboard
+			</button>
+			<button class="navbtn" data-view="scripts">
+				<svg viewBox="0 0 24 24"><path d="M13.8 3 8 12h5l-2.8 9L15 12h-5l3.8-9Z" fill="currentColor"/></svg>
+				Scripts
+			</button>
+			<button class="navbtn" data-view="users">
+				<svg viewBox="0 0 24 24"><path d="M16 11c1.7 0 3-1.3 3-3s-1.3-3-3-3-3 1.3-3 3 1.3 3 3 3Zm-8 0c1.7 0 3-1.3 3-3S9.7 5 8 5 5 6.3 5 8s1.3 3 3 3Zm0 2c-2.3 0-7 1.2-7 3.5V19h14v-2.5c0-2.3-4.7-3.5-7-3.5Zm8 0c-.3 0-.6 0-1 .1 1.2.8 2 1.8 2 2.9V19h6v-2.5c0-2.3-4.7-3.5-7-3.5Z" fill="currentColor"/></svg>
+				Users &amp; Keys
+			</button>
+			<button class="navbtn" data-view="api">
+				<svg viewBox="0 0 24 24"><path d="M12 1a5 5 0 0 0-5 5v2H6a2 2 0 0 0-2 2v10a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V10a2 2 0 0 0-2-2h-1V6a5 5 0 0 0-5-5Zm-3 7V6a3 3 0 1 1 6 0v2H9Z" fill="currentColor"/></svg>
+				API &amp; Profile
+			</button>
+			<button class="navbtn" data-view="discord">
+				<svg viewBox="0 0 24 24"><path d="M20 4H4a2 2 0 0 0-2 2v12a2 2 0 0 0 2 2h16a2 2 0 0 0 2-2V6a2 2 0 0 0-2-2Zm-2.5 11-.9-1.2c1.4-.4 2-1.3 2-1.3-1.3.5-2 .6-3 .7v1.4h-1.4V12H13v4h-1.4V12H9.9v2.7h-1.4V12H6.9v2.5H5.5v-1.9c-.5-.2-1-.5-1-.5H2.5V8.5h2.2l1.2 1.2L7.8 8.6l1.3 1.3 1.6-1.5 1.6 1.5 1.6-1.5 1.6 1.5 1.6-1.5 1.6 1.5 1.4-.5 1.2 1.2-1.2 1.2V15Z" fill="currentColor"/></svg>
+				Discord Bot
+			</button>
+		</nav>
+
+		<div class="sidefoot">
+			<div class="chip"><span class="dot" id="serverDot"></span><span id="serverChip">connecting…</span></div>
+			<button class="ghost small" id="logout" style="width:100%">Sign out</button>
+		</div>
+	</aside>
+
+	<div class="shell">
+		<header class="topbar">
+			<div>
+				<div class="crumbs"><span id="crumbHome">Admin</span><span class="sep">/</span><b id="pageTitle">Dashboard</b></div>
+				<p class="sub" id="pageSub">System health and execution overview</p>
 			</div>
-		</section>
+			<div id="persistWarn" class="msg err min hidden" style="margin:0"></div>
+		</header>
 
-		<section id="dash" class="hidden">
-			<div id="persistWarn" class="msg err hidden"></div>
-
-			<div class="statgrid" id="statTiles"></div>
-
-			<h2><span class="bar"></span>Key factory</h2>
-			<div class="card">
-				<div class="toolbar">
-					<input type="text" id="note" placeholder="Note / buyer name (optional)" class="grow" />
-					<select id="expiry">
-						<option value="">Never expires</option>
-						<option value="1h">1 hour</option>
-						<option value="1d">1 day</option>
-						<option value="7d">7 days</option>
-						<option value="30d">30 days</option>
-					</select>
-					<input type="number" id="count" value="1" min="1" max="100" style="max-width:90px" title="How many keys" />
-					<button id="generate">Generate keys</button>
+		<main>
+			<section id="auth" class="authwrap" style="margin:40px auto 0">
+				<h1>Admin access</h1>
+				<div class="card">
+					<div id="setupBox" class="hidden">
+						<p class="lead" style="margin-bottom:14px">First run — set a password (min 8 chars) to protect the admin console.</p>
+						<div class="row">
+							<input type="password" id="pwSetup" placeholder="New admin password" />
+							<button id="doSetup">Create</button>
+						</div>
+					</div>
+					<div id="loginBox" class="hidden">
+						<div class="row">
+							<input type="password" id="pwLogin" placeholder="Admin password" />
+							<button id="doLogin">Sign in</button>
+						</div>
+						<label style="display:flex;align-items:center;gap:8px;margin-top:14px;font-size:13px;color:var(--muted);cursor:pointer">
+							<input type="checkbox" id="rememberLogin" checked style="cursor:pointer" />
+							Keep me signed in (30 days)
+						</label>
+					</div>
+					<div id="authMsg" class="msg hidden"></div>
 				</div>
+			</section>
+
+			<!-- ===================== DASHBOARD ===================== -->
+			<section class="view" id="view-dashboard">
+				<div id="killBanner" class="msg err hidden" style="margin-top:0"></div>
+				<div class="statgrid" id="dashTiles"></div>
+
+				<div class="duo">
+					<div class="card">
+						<h3>Executions · last 14 days</h3>
+						<div id="dayChart" class="daychart"></div>
+						<p class="meta" id="dayChartMeta"></p>
+					</div>
+					<div class="card">
+						<h3>Execution counts — who runs it</h3>
+						<div id="execBars"></div>
+						<p class="meta" id="teleStat"></p>
+					</div>
+				</div>
+
+				<div class="card">
+					<h3 class="line"><span>Recent executions</span>
+						<span class="spacer"></span>
+						<button class="secondary small" id="refreshTele">Refresh</button>
+					</h3>
+					<div style="overflow-x:auto">
+						<table>
+							<thead><tr><th>User</th><th>UserId</th><th>Executor</th><th>Key</th><th>Time</th></tr></thead>
+							<tbody id="teleRows"></tbody>
+						</table>
+					</div>
+					<p class="meta" id="teleEmpty" style="padding:10px">No executions logged yet.</p>
+				</div>
+			</section>
+
+			<!-- ===================== SCRIPTS ===================== -->
+			<section class="view hidden" id="view-scripts">
+				<div class="headrow">
+					<h2><span class="bar"></span>Script management</h2>
+					<div class="chip" id="scriptStatus" style="background:rgba(139,92,246,0.08)"></div>
+				</div>
+
+				<div class="card" style="margin-bottom:18px">
+					<div class="killswitch">
+						<div>
+							<b style="font-size:14px">One-Click Kill Switch</b>
+							<p class="meta" id="killLabel">Execution enabled. Every loader currently validates and runs normally.</p>
+						</div>
+						<button class="switch" id="killSwitch" role="switch" aria-checked="false" title="Toggle execution"></button>
+					</div>
+				</div>
+
+				<div class="card hoverable" style="margin-bottom:18px">
+					<h3 class="line"><span>Update the protected script</span></h3>
+					<p class="meta" id="scriptMeta"></p>
+					<textarea id="scriptSrc" rows="10" placeholder="Paste your raw Luau script here — the whitelist key-gate is embedded on load, no manual edits needed."></textarea>
+					<div class="row" style="margin-top:12px">
+						<button id="scriptUpdate"><span class="cta">Update &amp; obfuscate</span></button>
+						<button class="secondary" id="scriptLoadCurrent" title="Load the currently served script into the editor">Edit current script</button>
+					</div>
+					<p class="meta">Saving makes the new script the one every loader loads on its next run. If Clyde is available on this server the payload is obfuscated before it ships; otherwise it falls back to plaintext for this update.</p>
+					<div id="scriptOut"></div>
+				</div>
+
+				<div class="card hoverable">
+					<h3 class="line"><span>Offline build</span><span class="tiny">no server, no key</span></h3>
+					<p class="meta">Turns a Luau script into a single self-contained <code>loadstring</code> build — for testing the payload without the loader site.</p>
+					<textarea id="convSrc" rows="6" placeholder="Paste your Luau script here…"></textarea>
+					<div class="row" style="margin-top:10px">
+						<button id="convDo">Convert pasted script</button>
+						<button class="secondary" id="convFile">Convert scripts/main.luau</button>
+					</div>
+					<div id="convOut"></div>
+				</div>
+			</section>
+
+			<!-- ===================== USERS & KEYS ===================== -->
+			<section class="view hidden" id="view-users">
+				<div class="headrow">
+					<h2><span class="bar"></span>User &amp; key management</h2>
+					<button class="secondary small" id="exportCsv">Export to Sellix (CSV)</button>
+				</div>
+
+				<div class="card" style="margin-bottom:18px">
+					<h3 class="line"><span>Key factory</span></h3>
+					<div class="seg" id="keyType">
+						<button type="button" data-type="temporary" class="active">Temporary</button>
+						<button type="button" data-type="daylocked">Day-locked</button>
+						<button type="button" data-type="lifetime">Lifetime</button>
+					</div>
+					<div class="toolbar" style="margin-top:10px">
+						<input type="text" id="keyNote" placeholder="Note / buyer name (optional)" class="grow" />
+						<select id="expiry" title="Expiry for last-lock/day-locked keys">
+							<option value="1h">1 hour</option>
+							<option value="1d" selected>1 day</option>
+							<option value="7d">7 days</option>
+							<option value="30d">30 days</option>
+							<option value="">Never</option>
+						</select>
+						<input type="number" id="keyCount" value="1" min="1" max="100" style="max-width:90px" title="How many keys" />
+						<button id="generate">Generate keys</button>
+					</div>
+					<p class="meta" id="typeHint">Temporary: expires after the chosen period. Bunches of keys can be pasted straight into Sellix as a product's keys.</p>
+					<div id="genOut"></div>
+				</div>
+
+				<div class="card hoverable" style="padding:8px">
+					<h3 class="line" style="padding:0 12px">
+						<span>Issued keys</span>
+						<span class="spacer"></span>
+						<span class="tiny" id="statline"></span>
+						<button class="secondary small" id="refresh">Refresh</button>
+					</h3>
+					<div style="overflow-x:auto">
+						<table>
+							<thead><tr><th>Key</th><th>Type</th><th>Note</th><th>Expires</th><th>Status</th><th>Uses</th><th>Last use</th><th style="text-align:right">Actions</th></tr></thead>
+							<tbody id="rows"></tbody>
+						</table>
+					</div>
+					<p class="meta" id="empty" style="padding:10px">No keys yet.</p>
+				</div>
+
 				<div class="toolbar">
 					<button class="secondary" id="genericLoader" title="Copy a loader that asks the buyer for their key inside the executor">Copy key-page loader</button>
-					<button class="secondary" id="oneLiner" title="Copy a one-liner: loadstring(game:HttpGet(".../api/script"))()">Copy one-liner</button>
+					<button class="secondary" id="oneLiner" title="Copy a one-liner: loadstring(game:HttpGet(&quot;.../api/script&quot;))()">Copy one-liner</button>
 				</div>
-				<div id="genOut"></div>
-			</div>
+				<p class="meta">To give a buyer access: <b>Loader</b> copies a one-click snippet for their key, <b>One-line</b> a single <code>loadstring</code> with the key baked into the URL, or copy the <b>key-page loader</b> / <b>one-liner</b> once and hand it to everyone. <b>+Time</b> extends a key's expiry. Revoking a key kills any snippet that carries it.</p>
+			</section>
 
-			<h2><span class="bar"></span>Issued keys
-				<span style="font-weight:400;color:var(--muted);font-size:12px" id="statline"></span>
-				<button class="secondary small" id="refresh" style="margin-left:auto">Refresh</button>
-			</h2>
-			<div class="card hoverable" style="padding:8px">
-				<table>
-					<thead>
-						<tr><th>Key</th><th>Note</th><th>Expires</th><th>Status</th><th>Uses</th><th>Last use</th><th style="text-align:right">Actions</th></tr>
-					</thead>
-					<tbody id="rows"></tbody>
-				</table>
-				<p class="meta" id="empty" style="padding:10px">No keys yet.</p>
-			</div>
-			<p class="meta">To give a buyer access: <b>Loader</b> copies a one-click snippet for their key, <b>One-line</b> a single <code>loadstring</code> with the key baked into the URL, or copy the <b>key-page loader</b> / <b>one-liner</b> once and hand it to everyone. <b>+Time</b> extends a key's expiry. Revoking a key kills any snippet that carries it.</p>
-
-			<h2><span class="bar"></span>Execution analytics
-				<span style="font-weight:400;color:var(--muted);font-size:12px" id="teleStat"></span>
-				<button class="secondary small" id="refreshTele" style="margin-left:auto">Refresh</button>
-			</h2>
-			<div class="card hoverable" style="padding:8px">
-				<div id="execBars" class="barlist"></div>
-				<div style="overflow-x:auto">
-					<table>
-						<thead>
-							<tr><th>User</th><th>UserId</th><th>Executor</th><th>Key</th><th>Time</th></tr>
-						</thead>
-						<tbody id="teleRows"></tbody>
-					</table>
+			<!-- ===================== API & PROFILE ===================== -->
+			<section class="view hidden" id="view-api">
+				<div class="headrow">
+					<h2><span class="bar"></span>API &amp; key management</h2>
 				</div>
-				<p class="meta" id="teleEmpty" style="padding:10px">No executions logged yet.</p>
-			</div>
 
-			<h2><span class="bar"></span>Script
-				<span style="font-weight:400;color:var(--muted);font-size:12px" id="scriptStatus"></span>
-			</h2>
-			<div class="card hoverable">
-				<p class="meta" id="scriptMeta"></p>
-				<textarea id="scriptSrc" rows="10" placeholder="Paste your updated Luau script here…"></textarea>
-				<div class="row" style="margin-top:12px">
-					<button id="scriptUpdate"><span class="cta">Update &amp; obfuscate</span></button>
-					<button class="secondary" id="scriptLoadCurrent" title="Load the currently served script into the editor">Edit current script</button>
+				<div class="card" style="margin-bottom:18px">
+					<h3 class="line"><span>API key</span></h3>
+					<p class="meta">The 52-character secret third-party services (Sellix webhooks, panels, bots) use to authenticate key checks. Keep it private — anyone holding it can query and manage keys.</p>
+					<div class="keybox">
+						<code id="apiKeyBox" class="mono">—</code>
+						<button class="secondary small" id="apiKeyCopy">Copy</button>
+						<button class="secondary small" id="apiKeyRegen">Regenerate</button>
+					</div>
+					<div id="apiKeyOut" class="msg hidden"></div>
 				</div>
-				<p class="meta">Saving makes the new script the one every loader loads on its next run. If Clyde is available on this server the payload is obfuscated before it ships; otherwise it falls back to plaintext for this update.</p>
-				<div id="scriptOut"></div>
-			</div>
 
-			<h2><span class="bar"></span>Offline build <span style="font-weight:400;color:var(--muted);font-size:12px">(no server, no key)</span></h2>
-			<div class="card hoverable">
-				<p class="meta">Turns a Luau script into a single self-contained <code>loadstring</code> build — no server, no key. Useful for testing the payload without the loader site.</p>
-				<textarea id="convSrc" rows="6" placeholder="Paste your Luau script here…"></textarea>
-				<div class="row" style="margin-top:10px">
-					<button id="convDo">Convert pasted script</button>
-					<button class="secondary" id="convFile">Convert scripts/main.luau</button>
+				<div class="card" style="margin-bottom:18px">
+					<h3 class="line"><span>IP whitelist</span></h3>
+					<p class="meta">Only calls coming from these IPs may use the API key. One per line, CIDR or range allowed. With an empty list any IP holding the key passes — whitelist your server before going live.</p>
+					<textarea id="whitelistInput" rows="5" placeholder="203.0.113.7&#10;198.51.100.0/24"></textarea>
+					<div class="row" style="margin-top:10px">
+						<button id="whitelistSave">Save whitelist</button>
+					</div>
+					<div id="whitelistOut" class="msg hidden"></div>
 				</div>
-				<div id="convOut"></div>
-			</div>
 
-			<h2><span class="bar"></span>Hygiene</h2>
-			<div class="row" style="margin-top:4px">
-				<button class="secondary" id="logout">Sign out</button>
-			</div>
-		</section>
-	</main>
+				<div class="card">
+					<h3 class="line"><span>External key-check endpoints</span></h3>
+					<p class="meta">Use these from your commerce platform or bot. <code>valid:true</code> means the key is live, unexpired and unrevoked.</p>
+					<pre class="code" id="apiExample"></pre>
+				</div>
+			</section>
 
-	<footer>CopE Loader — key-gated delivery · admin console</footer>
+			<!-- ===================== DISCORD ===================== -->
+			<section class="view hidden" id="view-discord">
+				<div class="headrow">
+					<h2><span class="bar"></span>Discord bot control</h2>
+				</div>
+
+				<div class="card" style="margin-bottom:18px">
+					<h3 class="line"><span>Settings</span></h3>
+					<p class="meta">CopE's ready-to-use Discord integration. Buyers get a mini panel in Discord to redeem license keys and reset their HWID without support tickets.</p>
+					<label class="field"><span>Enabled</span>
+						<button class="switch" id="dEnabled" role="switch" aria-checked="false"></button>
+					</label>
+					<label class="field"><span>Bot token</span>
+						<input type="password" id="dToken" placeholder="Discord bot token" />
+					</label>
+					<label class="field"><span>Guild ID</span>
+						<input type="text" id="dGuild" placeholder="e.g. 112233445566778899" />
+					</label>
+					<label class="field"><span>Command channel ID (optional)</span>
+						<input type="text" id="dChannel" placeholder="e.g. 112233445566778899" />
+					</label>
+					<div class="row" style="margin-top:12px">
+						<button id="dSave">Save Discord settings</button>
+					</div>
+					<div id="dOut" class="msg hidden"></div>
+				</div>
+
+				<div class="card">
+					<h3 class="line"><span>Running the bot</span></h3>
+					<p class="meta">The bot process runs outside of this site (it needs a persistent connection to Discord). It reads these settings directly from the same <code>DATABASE_URL</code> and exposes <code>/redeem &lt;key&gt;</code> (redeem a license key) and <code>/hwidreset &lt;key&gt;</code> (reset the HWID bound to a key) as slash commands — no code changes needed.</p>
+					<pre class="code">npm i discord.js pg
+node discord/bot.js</pre>
+				</div>
+			</section>
+		</main>
+
+		<footer>CopE Loader — key-gated delivery · admin console</footer>
+	</div>
 
 	<div id="snippetModal" class="modal hidden">
 		<div class="card">
