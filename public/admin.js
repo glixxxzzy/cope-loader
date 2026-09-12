@@ -31,7 +31,6 @@
 		scripts: { title: "Scripts", sub: "Payload management, kill switch, offline build" },
 		users: { title: "Users & Keys", sub: "Generate, extend, export and revoke license keys" },
 		api: { title: "API & Profile", sub: "External key-check API, key and IP whitelist" },
-		discord: { title: "Discord Bot", sub: "Buyer-facing redemption and HWID reset panel" },
 	};
 
 	// ---- bootstrap state / auth probe -------------------------------------
@@ -160,7 +159,7 @@
 	function loadView(name) {
 		if (name === "dashboard") loadDash();
 		else if (name === "users") loadKeys();
-		else if (name === "api" || name === "discord") loadConfig();
+		else if (name === "api") loadConfig();
 		else if (name === "scripts") {
 			loadScript();
 			renderKill();
@@ -679,15 +678,6 @@
 				"curl -X POST -H \"Authorization: Bearer <API_KEY>\" -H \"Content-Type: application/json\" \\\n" +
 				"  -d '{\"amount\":30,\"unit\":\"d\"}' " + base + "/api/v1/key/HERE-THE-KEY/extend";
 		}
-		const d = data.discord || {};
-		const de = document.getElementById("dEnabled");
-		if (de) {
-			de.classList.toggle("on", !!d.enabled);
-			de.setAttribute("aria-checked", String(!!d.enabled));
-		}
-		if (document.getElementById("dToken")) document.getElementById("dToken").value = d.botToken || "";
-		if (document.getElementById("dGuild")) document.getElementById("dGuild").value = d.guildId || "";
-		if (document.getElementById("dChannel")) document.getElementById("dChannel").value = d.channelId || "";
 		const apiKeyBox = document.getElementById("apiKeyBox");
 		if (apiKeyBox && data.apiKey) apiKeyBox.dataset.apiKey = data.apiKey;
 	}
@@ -748,38 +738,6 @@
 		out.className = "msg " + (data.ok ? "ok" : "err");
 		out.textContent = data.ok
 			? "Whitelist saved — " + ((data.ipWhitelist || "").split("\n").filter(Boolean).length || 0) + " entries."
-			: data.error || "Save failed.";
-		out.classList.remove("hidden");
-	});
-
-	// ---- discord ---------------------------------------------------------------
-	document.getElementById("dEnabled").addEventListener("click", () => {
-		const btn = document.getElementById("dEnabled");
-		const on = !btn.classList.contains("on");
-		btn.classList.toggle("on", on);
-		btn.setAttribute("aria-checked", String(on));
-	});
-	document.getElementById("dSave").addEventListener("click", async () => {
-		const res = await guard(() =>
-			fetch("/api/admin/config", {
-				method: "POST",
-				headers: { "Content-Type": "application/json" },
-				body: JSON.stringify({
-					discord: {
-						enabled: document.getElementById("dEnabled").classList.contains("on"),
-						botToken: document.getElementById("dToken").value,
-						guildId: document.getElementById("dGuild").value,
-						channelId: document.getElementById("dChannel").value,
-					},
-				}),
-			})
-		);
-		if (!res) return;
-		const data = await res.json();
-		const out = document.getElementById("dOut");
-		out.className = "msg " + (data.ok ? "ok" : "err");
-		out.textContent = data.ok
-			? "Discord settings saved. Restart your bot process (or start it) for the new values to apply."
 			: data.error || "Save failed.";
 		out.classList.remove("hidden");
 	});

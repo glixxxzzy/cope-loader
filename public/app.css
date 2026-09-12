@@ -410,7 +410,7 @@ button.switch.on:hover { filter: brightness(1.12); }
 .keybox { display: flex; align-items: center; gap: 10px; margin-top: 12px; }
 .keybox code { flex: 1; background: #06060f; border: 1px solid var(--edge); border-radius: var(--radius-sm); padding: 11px 14px; font-size: 13px; color: #c9e6c9; user-select: all; word-break: break-all; }
 
-/* Discord settings fields */
+/* Form fields */
 .field { display: flex; flex-direction: column; gap: 6px; margin-top: 12px; }
 .field > span { font-size: 12px; color: var(--muted); font-weight: 700; letter-spacing: 0.04em; text-transform: uppercase; }
 .field .switch { align-self: flex-start; }

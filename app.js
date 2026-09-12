@@ -493,6 +493,7 @@ app.post(
 );
 
 function requireAdmin(req, res, next) {
+	res.setHeader("Cache-Control", "no-store");
 	isAdmin(req).then(
 		(ok) => (ok ? next() : res.status(401).json({ ok: false, error: "Not signed in" })),
 		(next)
@@ -765,19 +766,13 @@ app.post("/api/admin/killswitch", requireAdmin, h(async (req, res) => {
 	res.json({ ok: true, enabled });
 }));
 
-// ---- Admin config (API key, IP whitelist, Discord settings) ------------------
+// ---- Admin config (API key, IP whitelist) -----------------------------------
 app.get("/api/admin/config", requireAdmin, h(async (_req, res) => {
 	res.json({
 		ok: true,
 		killSwitch: (await kv.getFlag("kill_switch")) === "1",
 		apiKey: (await kv.getFlag("api_key")) || null,
 		ipWhitelist: (await kv.getFlag("api_whitelist")) || "",
-		discord: {
-			enabled: (await kv.getFlag("discord_enabled")) === "1",
-			botToken: (await kv.getFlag("discord_token")) || "",
-			guildId: (await kv.getFlag("discord_guild")) || "",
-			channelId: (await kv.getFlag("discord_channel")) || "",
-		},
 	});
 }));
 
@@ -796,14 +791,6 @@ app.post("/api/admin/config", requireAdmin, h(async (req, res) => {
 			.join("\n");
 		await kv.setFlag("api_whitelist", cleaned);
 		return res.json({ ok: true, ipWhitelist: cleaned });
-	}
-	if (b.discord && typeof b.discord === "object") {
-		const d = b.discord;
-		await kv.setFlag("discord_enabled", d.enabled ? "1" : "0");
-		if (typeof d.botToken === "string") await kv.setFlag("discord_token", d.botToken.trim().slice(0, 200));
-		if (typeof d.guildId === "string") await kv.setFlag("discord_guild", d.guildId.trim().slice(0, 64));
-		if (typeof d.channelId === "string") await kv.setFlag("discord_channel", d.channelId.trim().slice(0, 64));
-		return res.json({ ok: true });
 	}
 	return res.status(400).json({ ok: false, error: "Unknown configuration action." });
 }));
@@ -838,6 +825,7 @@ async function apiAuthed(req) {
 }
 
 function apiAuth(req, res, next) {
+	res.setHeader("Cache-Control", "no-store");
 	apiAuthed(req).then(
 		(ok) => (ok ? next() : res.status(401).json({ error: "unauthorized" })),
 		() => res.status(500).json({ error: "internal error" })
@@ -991,7 +979,13 @@ function sendGoogle404(req, res) {
 
 app.get("/", (req, res) => sendGoogle404(req, res));
 
-app.get("/copehubontop-mavi", (_req, res) => res.sendFile(path.join(__dirname, "public", "admin.html")));
+app.get("/copehubontop-mavi", (_req, res) =>
+	res.setHeader("Cache-Control", "no-store").sendFile(path.join(__dirname, "public", "admin.html"))
+);
+
+// The admin page is served only on its covert path; its literal filename stays
+// a 404 so directory scanners can't discover it via express.static below.
+app.use("/admin.html", (req, res) => sendGoogle404(req, res));
 
 // ---- Static ----------------------------------------------------------------
 app.use(express.static(path.join(__dirname, "public")));
